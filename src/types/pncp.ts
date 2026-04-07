@@ -278,10 +278,17 @@ export interface FilterState {
   textoBusca: string;
   pagina: number;
   tamanhoPagina: number;
+  // Extended filters
+  situacaoCompraId: string;
+  srp: string; // "" | "true" | "false"
+  valorMinimo: string;
+  valorMaximo: string;
 }
 
 export interface KpiData {
   totalResultados: number;
   valorTotalEstimado: number;
   valorTotalHomologado: number;
+  totalPagina: number;
+  srpCount: number;
 }

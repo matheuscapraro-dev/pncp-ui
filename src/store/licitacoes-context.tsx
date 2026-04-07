@@ -54,6 +54,10 @@ const initialFilters: FilterState = {
   textoBusca: "",
   pagina: 1,
   tamanhoPagina: DEFAULT_PAGE_SIZE,
+  situacaoCompraId: "",
+  srp: "",
+  valorMinimo: "",
+  valorMaximo: "",
 };
 
 const initialState: State = {
@@ -65,7 +69,7 @@ const initialState: State = {
     numeroPagina: 0,
     paginasRestantes: 0,
   },
-  kpis: { totalResultados: 0, valorTotalEstimado: 0, valorTotalHomologado: 0 },
+  kpis: { totalResultados: 0, valorTotalEstimado: 0, valorTotalHomologado: 0, totalPagina: 0, srpCount: 0 },
   loading: false,
   error: null,
   sortByPriority: false,
@@ -99,11 +103,18 @@ function reducer(state: State, action: Action): State {
         (sum, c) => sum + (c.valorTotalHomologado ?? 0),
         0
       );
+      const srpCount = data.filter((c) => c.srp).length;
       return {
         ...state,
         results: data,
         pagination: { totalRegistros, totalPaginas, numeroPagina, paginasRestantes },
-        kpis: { totalResultados: totalRegistros, valorTotalEstimado, valorTotalHomologado },
+        kpis: {
+          totalResultados: totalRegistros,
+          valorTotalEstimado,
+          valorTotalHomologado,
+          totalPagina: data.length,
+          srpCount,
+        },
         loading: false,
         error: null,
       };
@@ -216,7 +227,7 @@ export function LicitacoesProvider({ children }: { children: ReactNode }) {
     [state.filters]
   );
 
-  // Client-side text filter + priority sort
+  // Client-side text filter + priority sort + extended filters
   const filteredResults = (() => {
     let items = state.results;
     const q = state.filters.textoBusca.toLowerCase().trim();
@@ -227,6 +238,27 @@ export function LicitacoesProvider({ children }: { children: ReactNode }) {
           c.orgaoEntidade?.razaoSocial?.toLowerCase().includes(q) ||
           c.unidadeOrgao?.nomeUnidade?.toLowerCase().includes(q)
       );
+    }
+    // Situação filter
+    if (state.filters.situacaoCompraId) {
+      items = items.filter(
+        (c) => c.situacaoCompraId === state.filters.situacaoCompraId
+      );
+    }
+    // SRP filter
+    if (state.filters.srp === "true") {
+      items = items.filter((c) => c.srp);
+    } else if (state.filters.srp === "false") {
+      items = items.filter((c) => !c.srp);
+    }
+    // Value range filter
+    const vMin = state.filters.valorMinimo ? parseFloat(state.filters.valorMinimo) : null;
+    const vMax = state.filters.valorMaximo ? parseFloat(state.filters.valorMaximo) : null;
+    if (vMin != null && !isNaN(vMin)) {
+      items = items.filter((c) => (c.valorTotalEstimado ?? 0) >= vMin);
+    }
+    if (vMax != null && !isNaN(vMax)) {
+      items = items.filter((c) => (c.valorTotalEstimado ?? 0) <= vMax);
     }
     if (state.sortByPriority) {
       items = [...items].sort(
