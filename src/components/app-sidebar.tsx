@@ -2,23 +2,13 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { FileText, ScrollText, Bookmark, Moon, Sun, Menu } from "lucide-react";
+import { FileText, Moon, Sun, Menu, Search } from "lucide-react";
 import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
-import { cn } from "@/lib/utils";
-
-const NAV_ITEMS = [
-  { href: "/", label: "Licitações", icon: FileText },
-  { href: "/contratos", label: "Contratos", icon: ScrollText },
-  { href: "/atas", label: "Atas de Registro", icon: Bookmark },
-];
 
 function SidebarContent({ onNavClick }: { onNavClick?: () => void }) {
-  const pathname = usePathname();
   const { theme, setTheme } = useTheme();
 
   return (
@@ -28,28 +18,19 @@ function SidebarContent({ onNavClick }: { onNavClick?: () => void }) {
         <span>PNCP Search</span>
       </div>
       <Separator />
-      <ScrollArea className="flex-1 px-2 py-2">
+      <div className="flex-1 px-2 py-2">
         <nav className="flex flex-col gap-1">
-          {NAV_ITEMS.map(({ href, label, icon: Icon }) => {
-            const active =
-              href === "/" ? pathname === "/" : pathname.startsWith(href);
-            return (
-              <Link key={href} href={href} onClick={onNavClick}>
-                <span
-                  className={cn(
-                    "flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-                    active &&
-                      "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
-                  )}
-                >
-                  <Icon className="h-4 w-4" />
-                  {label}
-                </span>
-              </Link>
-            );
-          })}
+          <Link href="/" onClick={onNavClick}>
+            <span className="flex items-center gap-2 rounded-md bg-sidebar-accent px-3 py-2 text-sm font-medium text-sidebar-accent-foreground">
+              <Search className="h-4 w-4" />
+              Consulta PNCP
+            </span>
+          </Link>
         </nav>
-      </ScrollArea>
+        <p className="mt-4 px-3 text-[10px] leading-relaxed text-muted-foreground">
+          Use os botões de &quot;Tipo de Consulta&quot; na página para alternar entre contratações, contratos e atas.
+        </p>
+      </div>
       <Separator />
       <div className="flex items-center justify-between p-3">
         <span className="text-xs text-muted-foreground">Tema</span>
