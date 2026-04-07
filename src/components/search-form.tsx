@@ -28,10 +28,15 @@ import {
   CalendarDays,
   RotateCcw,
   SlidersHorizontal,
+  Save,
+  Trash2,
+  Bookmark,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { daysAgoISO, todayISO } from "@/lib/utils";
 import type { SearchMode } from "@/types/pncp";
+import { useFilterPresets } from "@/hooks/use-filter-presets";
 
 const DATE_PRESETS = [
   { label: "7 dias", days: 7 },
@@ -46,6 +51,10 @@ export function SearchForm() {
   const { filters, loading } = state;
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const { presets, savePreset, deletePreset } = useFilterPresets();
+  const [activePresetId, setActivePresetId] = useState<string | null>(null);
+  const [showSaveInput, setShowSaveInput] = useState(false);
+  const [presetName, setPresetName] = useState("");
 
   const activeAdvancedCount = [
     filters.codigoModoDisputa != null,
@@ -56,6 +65,8 @@ export function SearchForm() {
     filters.srp !== "",
     filters.valorMinimo !== "",
     filters.valorMaximo !== "",
+    filters.palavrasIncluir !== "",
+    filters.palavrasExcluir !== "",
   ].filter(Boolean).length;
 
   function updateFilter(key: string, value: string | number | null) {
@@ -78,6 +89,46 @@ export function SearchForm() {
         pagina: 1,
       },
     });
+  }
+
+  function applyFilterPreset(presetId: string) {
+    const preset = presets.find((p) => p.id === presetId);
+    if (!preset) return;
+    dispatch({ type: "SET_FILTERS", payload: { ...preset.filters, pagina: 1 } });
+    setActivePresetId(presetId);
+    setShowAdvanced(true);
+    toast.success(`Preset "${preset.nome}" aplicado`);
+  }
+
+  function clearPreset() {
+    dispatch({ type: "RESET" });
+    setActivePresetId(null);
+  }
+
+  function handleSavePreset() {
+    const name = presetName.trim();
+    if (!name) {
+      toast.warning("Digite um nome para o preset.");
+      return;
+    }
+    // Save only non-default filter fields
+    const toSave: Record<string, unknown> = {};
+    if (filters.valorMinimo) toSave.valorMinimo = filters.valorMinimo;
+    if (filters.valorMaximo) toSave.valorMaximo = filters.valorMaximo;
+    if (filters.palavrasIncluir) toSave.palavrasIncluir = filters.palavrasIncluir;
+    if (filters.palavrasExcluir) toSave.palavrasExcluir = filters.palavrasExcluir;
+    if (filters.situacaoCompraId) toSave.situacaoCompraId = filters.situacaoCompraId;
+    if (filters.srp) toSave.srp = filters.srp;
+    if (filters.uf) toSave.uf = filters.uf;
+    if (filters.codigoModoDisputa != null) toSave.codigoModoDisputa = filters.codigoModoDisputa;
+    if (filters.codigoMunicipioIbge) toSave.codigoMunicipioIbge = filters.codigoMunicipioIbge;
+    if (filters.cnpj) toSave.cnpj = filters.cnpj;
+    if (filters.codigoModalidadeContratacao != null && filters.codigoModalidadeContratacao !== 6)
+      toSave.codigoModalidadeContratacao = filters.codigoModalidadeContratacao;
+    savePreset(name, toSave);
+    setPresetName("");
+    setShowSaveInput(false);
+    toast.success(`Preset "${name}" salvo!`);
   }
 
   function validate(): boolean {
@@ -129,6 +180,99 @@ export function SearchForm() {
           <TabsTrigger value="atualizacao">Por Atualização</TabsTrigger>
         </TabsList>
       </Tabs>
+
+      {/* Filter presets bar */}
+      <div className="flex flex-wrap items-center gap-2">
+        <Bookmark className="h-3.5 w-3.5 text-muted-foreground" />
+        <span className="text-xs font-medium text-muted-foreground">Presets:</span>
+        {presets.map((preset) => (
+          <div key={preset.id} className="flex items-center gap-0.5">
+            <Button
+              type="button"
+              variant={activePresetId === preset.id ? "default" : "outline"}
+              size="sm"
+              className="h-7 gap-1.5 px-2.5 text-xs"
+              onClick={() => applyFilterPreset(preset.id)}
+            >
+              {preset.nome}
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
+              onClick={() => {
+                deletePreset(preset.id);
+                if (activePresetId === preset.id) setActivePresetId(null);
+                toast.info(`Preset removido`);
+              }}
+            >
+              <Trash2 className="h-3 w-3" />
+            </Button>
+          </div>
+        ))}
+        {activePresetId && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-7 gap-1 px-2 text-xs text-muted-foreground"
+            onClick={clearPreset}
+          >
+            <X className="h-3 w-3" />
+            Limpar preset
+          </Button>
+        )}
+        <div className="ml-auto flex items-center gap-1.5">
+          {showSaveInput ? (
+            <>
+              <Input
+                className="h-7 w-40 text-xs"
+                placeholder="Nome do preset..."
+                value={presetName}
+                onChange={(e) => setPresetName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleSavePreset();
+                  }
+                  if (e.key === "Escape") setShowSaveInput(false);
+                }}
+                autoFocus
+              />
+              <Button
+                type="button"
+                variant="default"
+                size="sm"
+                className="h-7 px-2 text-xs"
+                onClick={handleSavePreset}
+              >
+                Salvar
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 w-7 p-0"
+                onClick={() => setShowSaveInput(false)}
+              >
+                <X className="h-3 w-3" />
+              </Button>
+            </>
+          ) : (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-7 gap-1.5 px-2.5 text-xs"
+              onClick={() => setShowSaveInput(true)}
+            >
+              <Save className="h-3 w-3" />
+              Salvar filtros atuais
+            </Button>
+          )}
+        </div>
+      </div>
 
       {/* Primary filters */}
       <div className="rounded-lg border bg-card p-4 shadow-sm">
@@ -406,6 +550,34 @@ export function SearchForm() {
                 value={filters.valorMaximo}
                 onChange={(e) => updateFilter("valorMaximo", e.target.value)}
               />
+            </div>
+
+            {/* Palavras-chave incluir */}
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor="palavrasIncluir">Palavras-chave (incluir)</Label>
+              <Input
+                id="palavrasIncluir"
+                placeholder="engenharia, construção, obra, reforma..."
+                value={filters.palavrasIncluir}
+                onChange={(e) => updateFilter("palavrasIncluir", e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                Separe por vírgula. Mantém itens que contenham qualquer uma das palavras.
+              </p>
+            </div>
+
+            {/* Palavras-chave excluir */}
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor="palavrasExcluir">Palavras-chave (excluir)</Label>
+              <Input
+                id="palavrasExcluir"
+                placeholder="execução, manutenção..."
+                value={filters.palavrasExcluir}
+                onChange={(e) => updateFilter("palavrasExcluir", e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                Separe por vírgula. Remove itens que contenham qualquer uma das palavras.
+              </p>
             </div>
           </div>
         </div>

@@ -283,6 +283,9 @@ export interface FilterState {
   srp: string; // "" | "true" | "false"
   valorMinimo: string;
   valorMaximo: string;
+  // Keyword filters (comma-separated, client-side OR matching on objetoCompra)
+  palavrasIncluir: string;
+  palavrasExcluir: string;
 }
 
 export interface KpiData {
@@ -291,4 +294,11 @@ export interface KpiData {
   valorTotalHomologado: number;
   totalPagina: number;
   srpCount: number;
+}
+
+export interface FilterPreset {
+  id: string;
+  nome: string;
+  filters: Partial<FilterState>;
+  createdAt: string;
 }

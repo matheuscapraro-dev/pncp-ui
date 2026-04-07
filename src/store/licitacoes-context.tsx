@@ -58,6 +58,8 @@ const initialFilters: FilterState = {
   srp: "",
   valorMinimo: "",
   valorMaximo: "",
+  palavrasIncluir: "",
+  palavrasExcluir: "",
 };
 
 const initialState: State = {
@@ -250,6 +252,30 @@ export function LicitacoesProvider({ children }: { children: ReactNode }) {
       items = items.filter((c) => c.srp);
     } else if (state.filters.srp === "false") {
       items = items.filter((c) => !c.srp);
+    }
+    // Keyword include filter (OR logic, accent-insensitive)
+    const includeKws = state.filters.palavrasIncluir
+      .split(",")
+      .map((k) => k.trim().toLowerCase())
+      .filter(Boolean)
+      .map((k) => k.normalize("NFD").replace(/[\u0300-\u036f]/g, ""));
+    if (includeKws.length > 0) {
+      items = items.filter((c) => {
+        const obj = (c.objetoCompra ?? "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+        return includeKws.some((kw) => obj.includes(kw));
+      });
+    }
+    // Keyword exclude filter (OR logic, accent-insensitive)
+    const excludeKws = state.filters.palavrasExcluir
+      .split(",")
+      .map((k) => k.trim().toLowerCase())
+      .filter(Boolean)
+      .map((k) => k.normalize("NFD").replace(/[\u0300-\u036f]/g, ""));
+    if (excludeKws.length > 0) {
+      items = items.filter((c) => {
+        const obj = (c.objetoCompra ?? "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+        return !excludeKws.some((kw) => obj.includes(kw));
+      });
     }
     // Value range filter
     const vMin = state.filters.valorMinimo ? parseFloat(state.filters.valorMinimo) : null;
