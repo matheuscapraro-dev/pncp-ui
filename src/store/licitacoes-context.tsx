@@ -5,6 +5,8 @@ import {
   useContext,
   useReducer,
   useCallback,
+  useRef,
+  useMemo,
   type ReactNode,
   type Dispatch,
 } from "react";
@@ -14,11 +16,13 @@ import type {
   ContratoDTO,
   AtaRegistroPrecoDTO,
   FilterState,
-  KpiData,
   PaginaRetorno,
   SearchMode,
 } from "@/types/pncp";
-import { DEFAULT_PAGE_SIZE } from "@/lib/constants";
+import {
+  MAX_PAGE_SIZE_CONTRATACOES,
+  MAX_PAGE_SIZE_CONTRATOS,
+} from "@/lib/constants";
 import {
   buscarContratacoesPorPublicacao,
   buscarContratacoesPorProposta,
@@ -45,24 +49,34 @@ export function isAtaMode(m: SearchMode): boolean {
   return m === "atas" || m === "atas_atualizacao";
 }
 
+function maxPageSize(mode: SearchMode): number {
+  return isContratacaoMode(mode) ? MAX_PAGE_SIZE_CONTRATACOES : MAX_PAGE_SIZE_CONTRATOS;
+}
+
+const FETCH_CONCURRENCY = 5;
+
 // ─── State ───────────────────────────────────────────────────────────────────
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type ResultItem = any;
 
+export interface FetchProgress {
+  loadedPages: number;
+  totalPages: number;
+  loadedItems: number;
+  totalItems: number;
+}
+
 interface State {
   filters: FilterState;
-  results: ResultItem[];
-  pagination: {
-    totalRegistros: number;
-    totalPaginas: number;
-    numeroPagina: number;
-    paginasRestantes: number;
-  };
-  kpis: KpiData;
+  allResults: ResultItem[];
+  totalApiResults: number;
   loading: boolean;
+  fetchProgress: FetchProgress | null;
   error: string | null;
   sortByPriority: boolean;
+  frontPage: number;
+  frontPageSize: number;
 }
 
 const initialFilters: FilterState = {
@@ -76,7 +90,7 @@ const initialFilters: FilterState = {
   cnpj: "",
   textoBusca: "",
   pagina: 1,
-  tamanhoPagina: DEFAULT_PAGE_SIZE,
+  tamanhoPagina: 20,
   codigoUnidadeAdministrativa: "",
   situacaoCompraId: "",
   srp: "",
@@ -96,76 +110,63 @@ const initialFilters: FilterState = {
 
 const initialState: State = {
   filters: initialFilters,
-  results: [],
-  pagination: { totalRegistros: 0, totalPaginas: 0, numeroPagina: 0, paginasRestantes: 0 },
-  kpis: { totalResultados: 0, valorTotalEstimado: 0, valorTotalHomologado: 0, totalPagina: 0, srpCount: 0 },
+  allResults: [],
+  totalApiResults: 0,
   loading: false,
+  fetchProgress: null,
   error: null,
   sortByPriority: false,
+  frontPage: 1,
+  frontPageSize: 50,
 };
 
 // ─── Actions ─────────────────────────────────────────────────────────────────
 
 type Action =
   | { type: "SET_FILTERS"; payload: Partial<FilterState> }
-  | { type: "SET_RESULTS"; payload: { page: PaginaRetorno<ResultItem>; mode: SearchMode } }
-  | { type: "SET_LOADING"; payload: boolean }
+  | { type: "FETCH_START" }
+  | { type: "FETCH_PROGRESS"; payload: { items: ResultItem[]; progress: FetchProgress } }
+  | { type: "FETCH_DONE" }
+  | { type: "FETCH_FIRST_PAGE"; payload: { items: ResultItem[]; totalItems: number; totalPages: number } }
   | { type: "SET_ERROR"; payload: string | null }
   | { type: "TOGGLE_PRIORITY" }
+  | { type: "SET_FRONT_PAGE"; payload: number }
+  | { type: "SET_FRONT_PAGE_SIZE"; payload: number }
   | { type: "RESET" };
-
-function computeKpis(data: ResultItem[], totalRegistros: number, mode: SearchMode): KpiData {
-  if (isContratacaoMode(mode)) {
-    const items = data as CompraPublicacaoDTO[];
-    return {
-      totalResultados: totalRegistros,
-      valorTotalEstimado: items.reduce((s, c) => s + (c.valorTotalEstimado ?? 0), 0),
-      valorTotalHomologado: items.reduce((s, c) => s + (c.valorTotalHomologado ?? 0), 0),
-      totalPagina: items.length,
-      srpCount: items.filter((c) => c.srp).length,
-    };
-  }
-  if (isContratoMode(mode)) {
-    const items = data as ContratoDTO[];
-    return {
-      totalResultados: totalRegistros,
-      valorTotalEstimado: items.reduce((s, c) => s + (c.valorInicial ?? 0), 0),
-      valorTotalHomologado: items.reduce((s, c) => s + (c.valorGlobal ?? 0), 0),
-      totalPagina: items.length,
-      srpCount: 0,
-    };
-  }
-  return {
-    totalResultados: totalRegistros,
-    valorTotalEstimado: 0,
-    valorTotalHomologado: 0,
-    totalPagina: data.length,
-    srpCount: 0,
-  };
-}
 
 function reducer(state: State, action: Action): State {
   switch (action.type) {
     case "SET_FILTERS":
-      return { ...state, filters: { ...state.filters, ...action.payload } };
-    case "SET_RESULTS": {
-      const { page, mode } = action.payload;
-      const { data, totalRegistros, totalPaginas, numeroPagina, paginasRestantes } = page;
+      return { ...state, filters: { ...state.filters, ...action.payload }, frontPage: 1 };
+    case "FETCH_START":
+      return { ...state, loading: true, error: null, allResults: [], totalApiResults: 0, fetchProgress: null, frontPage: 1 };
+    case "FETCH_FIRST_PAGE": {
+      const { items, totalItems, totalPages } = action.payload;
       return {
         ...state,
-        results: data,
-        pagination: { totalRegistros, totalPaginas, numeroPagina, paginasRestantes },
-        kpis: computeKpis(data, totalRegistros, mode),
-        loading: false,
-        error: null,
+        allResults: items,
+        totalApiResults: totalItems,
+        fetchProgress: { loadedPages: 1, totalPages, loadedItems: items.length, totalItems },
       };
     }
-    case "SET_LOADING":
-      return { ...state, loading: action.payload };
+    case "FETCH_PROGRESS": {
+      const { items, progress } = action.payload;
+      return {
+        ...state,
+        allResults: [...state.allResults, ...items],
+        fetchProgress: progress,
+      };
+    }
+    case "FETCH_DONE":
+      return { ...state, loading: false, fetchProgress: null };
     case "SET_ERROR":
-      return { ...state, error: action.payload, loading: false };
+      return { ...state, error: action.payload, loading: false, fetchProgress: null };
     case "TOGGLE_PRIORITY":
       return { ...state, sortByPriority: !state.sortByPriority };
+    case "SET_FRONT_PAGE":
+      return { ...state, frontPage: action.payload };
+    case "SET_FRONT_PAGE_SIZE":
+      return { ...state, frontPageSize: action.payload, frontPage: 1 };
     case "RESET":
       return initialState;
     default:
@@ -184,38 +185,225 @@ function normalizeText(text: string): string {
   return text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }
 
+// ─── Filtering ───────────────────────────────────────────────────────────────
+
+function applyFilters(allResults: ResultItem[], f: FilterState, sortByPriority: boolean): ResultItem[] {
+  const mode = f.searchMode;
+
+  if (isContratacaoMode(mode)) {
+    let items = allResults as CompraPublicacaoDTO[];
+    const q = f.textoBusca.toLowerCase().trim();
+    if (q) {
+      items = items.filter((c) =>
+        c.objetoCompra?.toLowerCase().includes(q) ||
+        c.orgaoEntidade?.razaoSocial?.toLowerCase().includes(q) ||
+        c.unidadeOrgao?.nomeUnidade?.toLowerCase().includes(q));
+    }
+    if (f.situacaoCompraId) items = items.filter((c) => c.situacaoCompraId === f.situacaoCompraId);
+    if (f.srp === "true") items = items.filter((c) => c.srp);
+    else if (f.srp === "false") items = items.filter((c) => !c.srp);
+    if (f.esferaId) items = items.filter((c) => c.orgaoEntidade?.esferaId === f.esferaId);
+    if (f.poderId) items = items.filter((c) => c.orgaoEntidade?.poderId === f.poderId);
+    if (f.tipoInstrumentoConvocatorio) {
+      const cod = Number(f.tipoInstrumentoConvocatorio);
+      items = items.filter((c) => c.tipoInstrumentoConvocatorioCodigo === cod);
+    }
+    if (f.municipioNome) {
+      const m = f.municipioNome.toLowerCase().trim();
+      items = items.filter((c) => c.unidadeOrgao?.municipioNome?.toLowerCase().includes(m));
+    }
+    if (f.nomeOrgao) {
+      const n = f.nomeOrgao.toLowerCase().trim();
+      items = items.filter((c) => c.orgaoEntidade?.razaoSocial?.toLowerCase().includes(n));
+    }
+    if (f.hasLinkExterno === "true") items = items.filter((c) => !!c.linkSistemaOrigem);
+    else if (f.hasLinkExterno === "false") items = items.filter((c) => !c.linkSistemaOrigem);
+
+    const incKws = parseKeywords(f.palavrasIncluir);
+    if (incKws.length > 0) {
+      items = items.filter((c) => {
+        const obj = normalizeText(c.objetoCompra ?? "");
+        return incKws.some((kw) => obj.includes(kw));
+      });
+    }
+    const excKws = parseKeywords(f.palavrasExcluir);
+    if (excKws.length > 0) {
+      items = items.filter((c) => {
+        const obj = normalizeText(c.objetoCompra ?? "");
+        return !excKws.some((kw) => obj.includes(kw));
+      });
+    }
+
+    const vMin = f.valorMinimo ? parseFloat(f.valorMinimo) : null;
+    const vMax = f.valorMaximo ? parseFloat(f.valorMaximo) : null;
+    if (vMin != null && !isNaN(vMin)) items = items.filter((c) => (c.valorTotalEstimado ?? 0) >= vMin);
+    if (vMax != null && !isNaN(vMax)) items = items.filter((c) => (c.valorTotalEstimado ?? 0) <= vMax);
+    const hMin = f.valorHomologadoMinimo ? parseFloat(f.valorHomologadoMinimo) : null;
+    const hMax = f.valorHomologadoMaximo ? parseFloat(f.valorHomologadoMaximo) : null;
+    if (hMin != null && !isNaN(hMin)) items = items.filter((c) => (c.valorTotalHomologado ?? 0) >= hMin);
+    if (hMax != null && !isNaN(hMax)) items = items.filter((c) => (c.valorTotalHomologado ?? 0) <= hMax);
+
+    if (sortByPriority) items = [...items].sort((a, b) => calcularPrioridade(b) - calcularPrioridade(a));
+    return items;
+  }
+
+  if (isContratoMode(mode)) {
+    let items = allResults as ContratoDTO[];
+    const q = f.textoBusca.toLowerCase().trim();
+    if (q) {
+      items = items.filter((c) =>
+        c.objetoContrato?.toLowerCase().includes(q) ||
+        c.nomeRazaoSocialFornecedor?.toLowerCase().includes(q) ||
+        c.orgaoEntidade?.razaoSocial?.toLowerCase().includes(q));
+    }
+    if (f.nomeOrgao) {
+      const n = f.nomeOrgao.toLowerCase().trim();
+      items = items.filter((c) => c.orgaoEntidade?.razaoSocial?.toLowerCase().includes(n));
+    }
+    const vMin = f.valorMinimo ? parseFloat(f.valorMinimo) : null;
+    const vMax = f.valorMaximo ? parseFloat(f.valorMaximo) : null;
+    if (vMin != null && !isNaN(vMin)) items = items.filter((c) => (c.valorInicial ?? 0) >= vMin);
+    if (vMax != null && !isNaN(vMax)) items = items.filter((c) => (c.valorInicial ?? 0) <= vMax);
+    const incKws = parseKeywords(f.palavrasIncluir);
+    if (incKws.length > 0) items = items.filter((c) => { const o = normalizeText(c.objetoContrato ?? ""); return incKws.some((kw) => o.includes(kw)); });
+    const excKws = parseKeywords(f.palavrasExcluir);
+    if (excKws.length > 0) items = items.filter((c) => { const o = normalizeText(c.objetoContrato ?? ""); return !excKws.some((kw) => o.includes(kw)); });
+    return items;
+  }
+
+  // Atas
+  {
+    let items = allResults as AtaRegistroPrecoDTO[];
+    const q = f.textoBusca.toLowerCase().trim();
+    if (q) {
+      items = items.filter((c) =>
+        c.objetoContratacao?.toLowerCase().includes(q) ||
+        c.nomeOrgao?.toLowerCase().includes(q) ||
+        c.nomeUnidadeOrgao?.toLowerCase().includes(q));
+    }
+    if (f.nomeOrgao) {
+      const n = f.nomeOrgao.toLowerCase().trim();
+      items = items.filter((c) => c.nomeOrgao?.toLowerCase().includes(n));
+    }
+    const incKws = parseKeywords(f.palavrasIncluir);
+    if (incKws.length > 0) items = items.filter((c) => { const o = normalizeText(c.objetoContratacao ?? ""); return incKws.some((kw) => o.includes(kw)); });
+    const excKws = parseKeywords(f.palavrasExcluir);
+    if (excKws.length > 0) items = items.filter((c) => { const o = normalizeText(c.objetoContratacao ?? ""); return !excKws.some((kw) => o.includes(kw)); });
+    return items;
+  }
+}
+
+// ─── Multi-page fetch helper ─────────────────────────────────────────────────
+
+type FetchPageFn = (pagina: number, tamanhoPagina: number) => Promise<PaginaRetorno<ResultItem>>;
+
+async function fetchAllPages(
+  fetchPage: FetchPageFn,
+  pageSize: number,
+  dispatch: Dispatch<Action>,
+  signal: AbortSignal,
+) {
+  // First page — discover totals
+  const first = await fetchPage(1, pageSize);
+  if (signal.aborted) return;
+
+  const totalPages = first.totalPaginas || 1;
+  const totalItems = first.totalRegistros || first.data.length;
+
+  dispatch({
+    type: "FETCH_FIRST_PAGE",
+    payload: { items: first.data, totalItems, totalPages },
+  });
+
+  if (totalPages <= 1) {
+    dispatch({ type: "FETCH_DONE" });
+    return;
+  }
+
+  // Remaining pages in concurrent batches
+  let loadedPages = 1;
+  let loadedItems = first.data.length;
+  const remaining = Array.from({ length: totalPages - 1 }, (_, i) => i + 2);
+
+  for (let i = 0; i < remaining.length; i += FETCH_CONCURRENCY) {
+    if (signal.aborted) return;
+
+    const batch = remaining.slice(i, i + FETCH_CONCURRENCY);
+    const results = await Promise.allSettled(
+      batch.map((p) => fetchPage(p, pageSize))
+    );
+
+    if (signal.aborted) return;
+
+    const batchItems: ResultItem[] = [];
+    for (const r of results) {
+      if (r.status === "fulfilled" && r.value.data) {
+        batchItems.push(...r.value.data);
+      }
+    }
+
+    loadedPages += batch.length;
+    loadedItems += batchItems.length;
+
+    dispatch({
+      type: "FETCH_PROGRESS",
+      payload: {
+        items: batchItems,
+        progress: { loadedPages, totalPages, loadedItems, totalItems },
+      },
+    });
+  }
+
+  dispatch({ type: "FETCH_DONE" });
+}
+
 // ─── Context ─────────────────────────────────────────────────────────────────
 
 interface LicitacoesContextValue {
   state: State;
   dispatch: Dispatch<Action>;
   executarBusca: (overrides?: Partial<FilterState>) => Promise<void>;
+  cancelarBusca: () => void;
   filteredResults: ResultItem[];
+  displayResults: ResultItem[];
+  totalFilteredPages: number;
 }
 
 const LicitacoesContext = createContext<LicitacoesContextValue | null>(null);
 
 export function LicitacoesProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initialState);
+  const abortRef = useRef<AbortController | null>(null);
+
+  const cancelarBusca = useCallback(() => {
+    if (abortRef.current) {
+      abortRef.current.abort();
+      abortRef.current = null;
+    }
+    dispatch({ type: "FETCH_DONE" });
+    toast.info("Busca cancelada.");
+  }, []);
 
   const executarBusca = useCallback(
     async (overrides?: Partial<FilterState>) => {
+      // Abort any in-flight fetch
+      if (abortRef.current) abortRef.current.abort();
+      const ac = new AbortController();
+      abortRef.current = ac;
+
       const filters = { ...state.filters, ...overrides };
       if (overrides) dispatch({ type: "SET_FILTERS", payload: overrides });
 
-      dispatch({ type: "SET_LOADING", payload: true });
-      dispatch({ type: "SET_ERROR", payload: null });
+      dispatch({ type: "FETCH_START" });
 
       try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        let result: PaginaRetorno<any>;
+        const mode = filters.searchMode;
+        const pgSize = maxPageSize(mode);
 
-        const base = { pagina: filters.pagina, tamanhoPagina: filters.tamanhoPagina };
         const optUnidade = filters.codigoUnidadeAdministrativa
           ? { codigoUnidadeAdministrativa: filters.codigoUnidadeAdministrativa } : {};
 
         const contratacaoCommon = {
-          ...base,
           ...optUnidade,
           ...(filters.uf ? { uf: filters.uf } : {}),
           ...(filters.codigoMunicipioIbge ? { codigoMunicipioIbge: filters.codigoMunicipioIbge } : {}),
@@ -223,78 +411,97 @@ export function LicitacoesProvider({ children }: { children: ReactNode }) {
           ...(filters.codigoModoDisputa != null ? { codigoModoDisputa: filters.codigoModoDisputa } : {}),
         };
 
-        switch (filters.searchMode) {
+        // Build a fetchPage function for the current mode
+        let fetchPage: FetchPageFn;
+
+        switch (mode) {
           case "publicacao":
-            result = await buscarContratacoesPorPublicacao({
-              dataInicial: filters.dataInicial,
-              dataFinal: filters.dataFinal,
-              codigoModalidadeContratacao: filters.codigoModalidadeContratacao ?? 6,
-              ...contratacaoCommon,
-            });
+            fetchPage = (pagina, tamanhoPagina) =>
+              buscarContratacoesPorPublicacao({
+                dataInicial: filters.dataInicial,
+                dataFinal: filters.dataFinal,
+                codigoModalidadeContratacao: filters.codigoModalidadeContratacao ?? 6,
+                pagina,
+                tamanhoPagina,
+                ...contratacaoCommon,
+              });
             break;
           case "proposta":
-            result = await buscarContratacoesPorProposta({
-              dataFinal: filters.dataFinal,
-              ...(filters.codigoModalidadeContratacao != null
-                ? { codigoModalidadeContratacao: filters.codigoModalidadeContratacao }
-                : {}),
-              ...contratacaoCommon,
-            });
+            fetchPage = (pagina, tamanhoPagina) =>
+              buscarContratacoesPorProposta({
+                dataFinal: filters.dataFinal,
+                pagina,
+                tamanhoPagina,
+                ...(filters.codigoModalidadeContratacao != null
+                  ? { codigoModalidadeContratacao: filters.codigoModalidadeContratacao }
+                  : {}),
+                ...contratacaoCommon,
+              });
             break;
           case "atualizacao":
-            result = await buscarContratacoesPorAtualizacao({
-              dataInicial: filters.dataInicial,
-              dataFinal: filters.dataFinal,
-              codigoModalidadeContratacao: filters.codigoModalidadeContratacao ?? 6,
-              ...contratacaoCommon,
-            });
+            fetchPage = (pagina, tamanhoPagina) =>
+              buscarContratacoesPorAtualizacao({
+                dataInicial: filters.dataInicial,
+                dataFinal: filters.dataFinal,
+                codigoModalidadeContratacao: filters.codigoModalidadeContratacao ?? 6,
+                pagina,
+                tamanhoPagina,
+                ...contratacaoCommon,
+              });
             break;
           case "contratos":
-            result = await buscarContratos({
-              dataInicial: filters.dataInicial,
-              dataFinal: filters.dataFinal,
-              ...base,
-              ...optUnidade,
-              ...(filters.cnpj ? { cnpjOrgao: filters.cnpj } : {}),
-            });
+            fetchPage = (pagina, tamanhoPagina) =>
+              buscarContratos({
+                dataInicial: filters.dataInicial,
+                dataFinal: filters.dataFinal,
+                pagina,
+                tamanhoPagina,
+                ...optUnidade,
+                ...(filters.cnpj ? { cnpjOrgao: filters.cnpj } : {}),
+              });
             break;
           case "contratos_atualizacao":
-            result = await buscarContratosAtualizacao({
-              dataInicial: filters.dataInicial,
-              dataFinal: filters.dataFinal,
-              ...base,
-              ...optUnidade,
-              ...(filters.cnpj ? { cnpjOrgao: filters.cnpj } : {}),
-            });
+            fetchPage = (pagina, tamanhoPagina) =>
+              buscarContratosAtualizacao({
+                dataInicial: filters.dataInicial,
+                dataFinal: filters.dataFinal,
+                pagina,
+                tamanhoPagina,
+                ...optUnidade,
+                ...(filters.cnpj ? { cnpjOrgao: filters.cnpj } : {}),
+              });
             break;
           case "atas":
-            result = await buscarAtas({
-              dataInicial: filters.dataInicial,
-              dataFinal: filters.dataFinal,
-              ...base,
-              ...optUnidade,
-              ...(filters.cnpj ? { cnpj: filters.cnpj } : {}),
-            });
+            fetchPage = (pagina, tamanhoPagina) =>
+              buscarAtas({
+                dataInicial: filters.dataInicial,
+                dataFinal: filters.dataFinal,
+                pagina,
+                tamanhoPagina,
+                ...optUnidade,
+                ...(filters.cnpj ? { cnpj: filters.cnpj } : {}),
+              });
             break;
           case "atas_atualizacao":
-            result = await buscarAtasAtualizacao({
-              dataInicial: filters.dataInicial,
-              dataFinal: filters.dataFinal,
-              ...base,
-              ...optUnidade,
-              ...(filters.cnpj ? { cnpj: filters.cnpj } : {}),
-            });
+            fetchPage = (pagina, tamanhoPagina) =>
+              buscarAtasAtualizacao({
+                dataInicial: filters.dataInicial,
+                dataFinal: filters.dataFinal,
+                pagina,
+                tamanhoPagina,
+                ...optUnidade,
+                ...(filters.cnpj ? { cnpj: filters.cnpj } : {}),
+              });
             break;
         }
 
-        dispatch({ type: "SET_RESULTS", payload: { page: result, mode: filters.searchMode } });
+        await fetchAllPages(fetchPage, pgSize, dispatch, ac.signal);
 
-        if (result.empty || result.data.length === 0) {
-          toast.info("Nenhum resultado encontrado para os filtros selecionados.");
-        } else {
-          toast.success(`${result.totalRegistros} resultados encontrados.`);
+        if (!ac.signal.aborted) {
+          toast.success("Todos os resultados carregados.");
         }
       } catch (err) {
+        if ((err as Error)?.name === "AbortError") return;
         const message = err instanceof Error ? err.message : "Erro desconhecido";
         dispatch({ type: "SET_ERROR", payload: message });
         toast.error("Erro na busca", { description: message });
@@ -303,118 +510,24 @@ export function LicitacoesProvider({ children }: { children: ReactNode }) {
     [state.filters]
   );
 
-  // ── Client-side filtering ──
-  const filteredResults = (() => {
-    const f = state.filters;
-    const mode = f.searchMode;
+  // Client-side filtering over all accumulated results
+  const filteredResults = useMemo(
+    () => applyFilters(state.allResults, state.filters, state.sortByPriority),
+    [state.allResults, state.filters, state.sortByPriority]
+  );
 
-    // ── Contratações ──
-    if (isContratacaoMode(mode)) {
-      let items = state.results as CompraPublicacaoDTO[];
-      const q = f.textoBusca.toLowerCase().trim();
-      if (q) {
-        items = items.filter((c) =>
-          c.objetoCompra?.toLowerCase().includes(q) ||
-          c.orgaoEntidade?.razaoSocial?.toLowerCase().includes(q) ||
-          c.unidadeOrgao?.nomeUnidade?.toLowerCase().includes(q));
-      }
-      if (f.situacaoCompraId) items = items.filter((c) => c.situacaoCompraId === f.situacaoCompraId);
-      if (f.srp === "true") items = items.filter((c) => c.srp);
-      else if (f.srp === "false") items = items.filter((c) => !c.srp);
-      if (f.esferaId) items = items.filter((c) => c.orgaoEntidade?.esferaId === f.esferaId);
-      if (f.poderId) items = items.filter((c) => c.orgaoEntidade?.poderId === f.poderId);
-      if (f.tipoInstrumentoConvocatorio) {
-        const cod = Number(f.tipoInstrumentoConvocatorio);
-        items = items.filter((c) => c.tipoInstrumentoConvocatorioCodigo === cod);
-      }
-      if (f.municipioNome) {
-        const m = f.municipioNome.toLowerCase().trim();
-        items = items.filter((c) => c.unidadeOrgao?.municipioNome?.toLowerCase().includes(m));
-      }
-      if (f.nomeOrgao) {
-        const n = f.nomeOrgao.toLowerCase().trim();
-        items = items.filter((c) => c.orgaoEntidade?.razaoSocial?.toLowerCase().includes(n));
-      }
-      if (f.hasLinkExterno === "true") items = items.filter((c) => !!c.linkSistemaOrigem);
-      else if (f.hasLinkExterno === "false") items = items.filter((c) => !c.linkSistemaOrigem);
+  // Client-side pagination
+  const totalFilteredPages = Math.max(1, Math.ceil(filteredResults.length / state.frontPageSize));
 
-      const incKws = parseKeywords(f.palavrasIncluir);
-      if (incKws.length > 0) {
-        items = items.filter((c) => {
-          const obj = normalizeText(c.objetoCompra ?? "");
-          return incKws.some((kw) => obj.includes(kw));
-        });
-      }
-      const excKws = parseKeywords(f.palavrasExcluir);
-      if (excKws.length > 0) {
-        items = items.filter((c) => {
-          const obj = normalizeText(c.objetoCompra ?? "");
-          return !excKws.some((kw) => obj.includes(kw));
-        });
-      }
-
-      const vMin = f.valorMinimo ? parseFloat(f.valorMinimo) : null;
-      const vMax = f.valorMaximo ? parseFloat(f.valorMaximo) : null;
-      if (vMin != null && !isNaN(vMin)) items = items.filter((c) => (c.valorTotalEstimado ?? 0) >= vMin);
-      if (vMax != null && !isNaN(vMax)) items = items.filter((c) => (c.valorTotalEstimado ?? 0) <= vMax);
-      const hMin = f.valorHomologadoMinimo ? parseFloat(f.valorHomologadoMinimo) : null;
-      const hMax = f.valorHomologadoMaximo ? parseFloat(f.valorHomologadoMaximo) : null;
-      if (hMin != null && !isNaN(hMin)) items = items.filter((c) => (c.valorTotalHomologado ?? 0) >= hMin);
-      if (hMax != null && !isNaN(hMax)) items = items.filter((c) => (c.valorTotalHomologado ?? 0) <= hMax);
-
-      if (state.sortByPriority) items = [...items].sort((a, b) => calcularPrioridade(b) - calcularPrioridade(a));
-      return items;
-    }
-
-    // ── Contratos ──
-    if (isContratoMode(mode)) {
-      let items = state.results as ContratoDTO[];
-      const q = f.textoBusca.toLowerCase().trim();
-      if (q) {
-        items = items.filter((c) =>
-          c.objetoContrato?.toLowerCase().includes(q) ||
-          c.nomeRazaoSocialFornecedor?.toLowerCase().includes(q) ||
-          c.orgaoEntidade?.razaoSocial?.toLowerCase().includes(q));
-      }
-      if (f.nomeOrgao) {
-        const n = f.nomeOrgao.toLowerCase().trim();
-        items = items.filter((c) => c.orgaoEntidade?.razaoSocial?.toLowerCase().includes(n));
-      }
-      const vMin = f.valorMinimo ? parseFloat(f.valorMinimo) : null;
-      const vMax = f.valorMaximo ? parseFloat(f.valorMaximo) : null;
-      if (vMin != null && !isNaN(vMin)) items = items.filter((c) => (c.valorInicial ?? 0) >= vMin);
-      if (vMax != null && !isNaN(vMax)) items = items.filter((c) => (c.valorInicial ?? 0) <= vMax);
-      const incKws = parseKeywords(f.palavrasIncluir);
-      if (incKws.length > 0) items = items.filter((c) => { const o = normalizeText(c.objetoContrato ?? ""); return incKws.some((kw) => o.includes(kw)); });
-      const excKws = parseKeywords(f.palavrasExcluir);
-      if (excKws.length > 0) items = items.filter((c) => { const o = normalizeText(c.objetoContrato ?? ""); return !excKws.some((kw) => o.includes(kw)); });
-      return items;
-    }
-
-    // ── Atas ──
-    {
-      let items = state.results as AtaRegistroPrecoDTO[];
-      const q = f.textoBusca.toLowerCase().trim();
-      if (q) {
-        items = items.filter((c) =>
-          c.objetoContratacao?.toLowerCase().includes(q) ||
-          c.nomeOrgao?.toLowerCase().includes(q) ||
-          c.nomeUnidadeOrgao?.toLowerCase().includes(q));
-      }
-      if (f.nomeOrgao) {
-        const n = f.nomeOrgao.toLowerCase().trim();
-        items = items.filter((c) => c.nomeOrgao?.toLowerCase().includes(n));
-      }
-      const incKws = parseKeywords(f.palavrasIncluir);
-      if (incKws.length > 0) items = items.filter((c) => { const o = normalizeText(c.objetoContratacao ?? ""); return incKws.some((kw) => o.includes(kw)); });
-      const excKws = parseKeywords(f.palavrasExcluir);
-      if (excKws.length > 0) items = items.filter((c) => { const o = normalizeText(c.objetoContratacao ?? ""); return !excKws.some((kw) => o.includes(kw)); });
-      return items;
-    }
-  })();
+  const displayResults = useMemo(() => {
+    const start = (state.frontPage - 1) * state.frontPageSize;
+    return filteredResults.slice(start, start + state.frontPageSize);
+  }, [filteredResults, state.frontPage, state.frontPageSize]);
 
   return (
-    <LicitacoesContext.Provider value={{ state, dispatch, executarBusca, filteredResults }}>
+    <LicitacoesContext.Provider
+      value={{ state, dispatch, executarBusca, cancelarBusca, filteredResults, displayResults, totalFilteredPages }}
+    >
       {children}
     </LicitacoesContext.Provider>
   );

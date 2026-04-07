@@ -3,17 +3,19 @@
 import { useLicitacoes, isContratacaoMode, isContratoMode } from "@/store/licitacoes-context";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Progress } from "@/components/ui/progress";
 import { formatCurrency, formatNumber } from "@/lib/utils";
-import { FileText, DollarSign, CheckCircle, Layers, Bookmark, Filter } from "lucide-react";
+import { FileText, DollarSign, CheckCircle, Database, Bookmark, Filter, Loader2 } from "lucide-react";
 import type { CompraPublicacaoDTO, ContratoDTO } from "@/types/pncp";
 
 export function KpiCards() {
   const { state, filteredResults } = useLicitacoes();
-  const { kpis, loading } = state;
+  const { loading, fetchProgress, allResults, totalApiResults } = state;
   const mode = state.filters.searchMode;
 
-  // Compute KPIs from the FILTERED results (what the user actually sees)
+  const totalLoaded = allResults.length;
   const filteredCount = filteredResults.length;
+  const hasFilters = filteredCount !== totalLoaded;
 
   let filteredEstimado = 0;
   let filteredHomologado = 0;
@@ -31,24 +33,45 @@ export function KpiCards() {
   }
 
   const avgEstimado = filteredCount > 0 ? filteredEstimado / filteredCount : 0;
-  const hasClientFilters = filteredCount !== kpis.totalPagina;
+
+  // Progress bar during fetch
+  if (fetchProgress && fetchProgress.totalPages > 1) {
+    const pct = Math.round((fetchProgress.loadedPages / fetchProgress.totalPages) * 100);
+    return (
+      <div className="rounded-lg border bg-card p-4 space-y-2">
+        <div className="flex items-center gap-2">
+          <Loader2 className="h-4 w-4 animate-spin text-primary" />
+          <span className="text-sm font-medium">
+            Carregando dados... Página {fetchProgress.loadedPages} de {fetchProgress.totalPages}
+          </span>
+        </div>
+        <Progress value={pct} className="h-2" />
+        <p className="text-xs text-muted-foreground">
+          {formatNumber(fetchProgress.loadedItems)} de {formatNumber(fetchProgress.totalItems)} itens carregados
+          {filteredCount > 0 && hasFilters && ` · ${formatNumber(filteredCount)} correspondem aos filtros`}
+        </p>
+      </div>
+    );
+  }
 
   const cards = [
     {
       label: "Total na API",
-      value: formatNumber(kpis.totalResultados),
-      subtitle: hasClientFilters ? `${filteredCount} após filtros locais` : undefined,
-      icon: FileText,
+      value: formatNumber(totalApiResults),
+      subtitle: `${formatNumber(totalLoaded)} carregados`,
+      icon: Database,
       color: "text-blue-600 dark:text-blue-400",
       bg: "bg-blue-50 dark:bg-blue-950/30",
     },
     {
-      label: hasClientFilters ? "Exibindo" : "Na Página",
+      label: hasFilters ? "Após Filtros" : "Resultados",
       value: formatNumber(filteredCount),
-      subtitle: hasClientFilters ? `de ${kpis.totalPagina} da página` : `de ${kpis.totalResultados.toLocaleString("pt-BR")} total`,
-      icon: hasClientFilters ? Filter : Layers,
-      color: hasClientFilters ? "text-amber-600 dark:text-amber-400" : "text-orange-600 dark:text-orange-400",
-      bg: hasClientFilters ? "bg-amber-50 dark:bg-amber-950/30" : "bg-orange-50 dark:bg-orange-950/30",
+      subtitle: hasFilters
+        ? `de ${formatNumber(totalLoaded)} carregados`
+        : undefined,
+      icon: hasFilters ? Filter : FileText,
+      color: hasFilters ? "text-amber-600 dark:text-amber-400" : "text-orange-600 dark:text-orange-400",
+      bg: hasFilters ? "bg-amber-50 dark:bg-amber-950/30" : "bg-orange-50 dark:bg-orange-950/30",
     },
     ...(isContratacaoMode(mode) || isContratoMode(mode)
       ? [
@@ -75,7 +98,7 @@ export function KpiCards() {
             label: "SRP",
             value: formatNumber(filteredSrpCount),
             subtitle: filteredCount > 0
-              ? `${Math.round((filteredSrpCount / filteredCount) * 100)}% dos exibidos`
+              ? `${Math.round((filteredSrpCount / filteredCount) * 100)}%`
               : undefined,
             icon: Bookmark,
             color: "text-cyan-600 dark:text-cyan-400",
@@ -107,7 +130,7 @@ export function KpiCards() {
             </div>
           </CardHeader>
           <CardContent className="p-3 pt-0">
-            {loading ? (
+            {loading && !fetchProgress ? (
               <Skeleton className="h-6 w-24" />
             ) : (
               <>

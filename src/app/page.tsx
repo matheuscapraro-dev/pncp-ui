@@ -10,7 +10,7 @@ import { FileText } from "lucide-react";
 
 export default function HomePage() {
   const { state } = useLicitacoes();
-  const hasResults = state.results.length > 0 || state.loading;
+  const hasResults = state.allResults.length > 0 || state.loading;
 
   return (
     <div className="mx-auto max-w-[1400px] space-y-4 px-3 py-4 sm:space-y-6 sm:px-4 sm:py-6">

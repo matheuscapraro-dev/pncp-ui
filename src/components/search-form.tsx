@@ -60,7 +60,7 @@ const MODE_LABELS: Record<SearchMode, string> = {
 };
 
 export function SearchForm() {
-  const { state, dispatch, executarBusca } = useLicitacoes();
+  const { state, dispatch, executarBusca, cancelarBusca } = useLicitacoes();
   const { filters, loading } = state;
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -166,7 +166,7 @@ export function SearchForm() {
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!validate()) return;
-    executarBusca({ pagina: 1 });
+    executarBusca();
   }
 
   return (
@@ -524,6 +524,11 @@ export function SearchForm() {
           {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
           {loading ? "Buscando..." : "Buscar"}
         </Button>
+        {loading && (
+          <Button type="button" variant="destructive" size="sm" className="gap-1.5" onClick={cancelarBusca}>
+            <X className="h-3.5 w-3.5" /> Cancelar
+          </Button>
+        )}
         <Button type="button" variant="outline" size="sm" className="gap-1.5"
           onClick={() => { dispatch({ type: "RESET" }); setActivePresetId(null); }}>
           <RotateCcw className="h-3 w-3" /> Limpar

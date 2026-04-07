@@ -16,21 +16,20 @@ import {
   ChevronsRight,
 } from "lucide-react";
 
-const PAGE_SIZE_OPTIONS = [10, 20, 30, 50];
+const PAGE_SIZE_OPTIONS = [20, 50, 100, 200];
 
 export function Pagination() {
-  const { state, executarBusca } = useLicitacoes();
-  const { pagination, loading, filters } = state;
-  const { totalPaginas, numeroPagina, totalRegistros } = pagination;
+  const { state, dispatch, totalFilteredPages, filteredResults } = useLicitacoes();
+  const { loading, frontPage, frontPageSize } = state;
 
-  if (totalPaginas <= 0) return null;
+  if (totalFilteredPages <= 0) return null;
 
   function goToPage(page: number) {
-    executarBusca({ pagina: page });
+    dispatch({ type: "SET_FRONT_PAGE", payload: page });
   }
 
   function changePageSize(size: string) {
-    executarBusca({ tamanhoPagina: Number(size), pagina: 1 });
+    dispatch({ type: "SET_FRONT_PAGE_SIZE", payload: Number(size) });
   }
 
   return (
@@ -38,7 +37,7 @@ export function Pagination() {
       <div className="flex items-center gap-3">
         <span className="text-sm text-muted-foreground">Itens por página:</span>
         <Select
-          value={String(filters.tamanhoPagina)}
+          value={String(frontPageSize)}
           onValueChange={changePageSize}
         >
           <SelectTrigger className="h-8 w-[70px]">
@@ -53,7 +52,7 @@ export function Pagination() {
           </SelectContent>
         </Select>
         <span className="text-sm text-muted-foreground">
-          Página {numeroPagina} de {totalPaginas} ({totalRegistros.toLocaleString("pt-BR")} resultados)
+          Página {frontPage} de {totalFilteredPages} ({filteredResults.length.toLocaleString("pt-BR")} resultados)
         </span>
       </div>
       <div className="flex items-center gap-1">
@@ -61,7 +60,7 @@ export function Pagination() {
           variant="outline"
           size="icon"
           className="h-8 w-8"
-          disabled={numeroPagina <= 1 || loading}
+          disabled={frontPage <= 1 || loading}
           onClick={() => goToPage(1)}
         >
           <ChevronsLeft className="h-4 w-4" />
@@ -70,8 +69,8 @@ export function Pagination() {
           variant="outline"
           size="icon"
           className="h-8 w-8"
-          disabled={numeroPagina <= 1 || loading}
-          onClick={() => goToPage(filters.pagina - 1)}
+          disabled={frontPage <= 1 || loading}
+          onClick={() => goToPage(frontPage - 1)}
         >
           <ChevronLeft className="h-4 w-4" />
         </Button>
@@ -79,8 +78,8 @@ export function Pagination() {
           variant="outline"
           size="icon"
           className="h-8 w-8"
-          disabled={numeroPagina >= totalPaginas || loading}
-          onClick={() => goToPage(filters.pagina + 1)}
+          disabled={frontPage >= totalFilteredPages || loading}
+          onClick={() => goToPage(frontPage + 1)}
         >
           <ChevronRight className="h-4 w-4" />
         </Button>
@@ -88,8 +87,8 @@ export function Pagination() {
           variant="outline"
           size="icon"
           className="h-8 w-8"
-          disabled={numeroPagina >= totalPaginas || loading}
-          onClick={() => goToPage(totalPaginas)}
+          disabled={frontPage >= totalFilteredPages || loading}
+          onClick={() => goToPage(totalFilteredPages)}
         >
           <ChevronsRight className="h-4 w-4" />
         </Button>

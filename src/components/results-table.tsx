@@ -191,14 +191,14 @@ function MobileAtaCard({ c }: { c: AtaRegistroPrecoDTO }) {
 
 export function ResultsTable() {
   const router = useRouter();
-  const { state, dispatch, filteredResults } = useLicitacoes();
-  const { loading, error, sortByPriority } = state;
+  const { state, dispatch, filteredResults, displayResults } = useLicitacoes();
+  const { loading, error, sortByPriority, allResults } = state;
   const mode = state.filters.searchMode;
   const isContratacao = isContratacaoMode(mode);
   const isContrato = isContratoMode(mode);
   const isAta = isAtaMode(mode);
 
-  const hasClientFilters = filteredResults.length !== state.kpis.totalPagina;
+  const hasClientFilters = filteredResults.length !== allResults.length;
 
   if (error) {
     return (
@@ -225,14 +225,14 @@ export function ResultsTable() {
             {hasClientFilters && (
               <span className="ml-1 inline-flex items-center gap-1 text-amber-600 dark:text-amber-400">
                 <Filter className="inline h-3 w-3" />
-                de {state.kpis.totalPagina} na página (filtros locais ativos)
+                de {allResults.length} carregados (filtros ativos)
               </span>
             )}
           </>
-        ) : state.results.length > 0 ? (
+        ) : allResults.length > 0 ? (
           <span className="text-amber-600 dark:text-amber-400">
             <Filter className="mr-1 inline h-3 w-3" />
-            Nenhum resultado após filtros locais ({state.kpis.totalPagina} na página original)
+            Nenhum resultado após filtros ({allResults.length} carregados)
           </span>
         ) : ""}
       </p>
@@ -262,7 +262,7 @@ export function ResultsTable() {
 
   // ── CONTRATAÇÕES TABLE ──
   if (isContratacao) {
-    const items = filteredResults as CompraPublicacaoDTO[];
+    const items = displayResults as CompraPublicacaoDTO[];
     const colCount = sortByPriority ? 10 : 9;
 
     return (
@@ -381,7 +381,7 @@ export function ResultsTable() {
 
   // ── CONTRATOS TABLE ──
   if (isContrato) {
-    const items = filteredResults as ContratoDTO[];
+    const items = displayResults as ContratoDTO[];
     return (
       <div>
         {statusBar}
@@ -453,7 +453,7 @@ export function ResultsTable() {
   }
 
   // ── ATAS TABLE ──
-  const ataItems = filteredResults as AtaRegistroPrecoDTO[];
+  const ataItems = displayResults as AtaRegistroPrecoDTO[];
   return (
     <div>
       {statusBar}
