@@ -16,22 +16,12 @@ import type {
   ContratoDTO,
   AtaRegistroPrecoDTO,
   FilterState,
-  PaginaRetorno,
   SearchMode,
 } from "@/types/pncp";
 import {
   MAX_PAGE_SIZE_CONTRATACOES,
   MAX_PAGE_SIZE_CONTRATOS,
 } from "@/lib/constants";
-import {
-  buscarContratacoesPorPublicacao,
-  buscarContratacoesPorProposta,
-  buscarContratacoesPorAtualizacao,
-  buscarContratos,
-  buscarContratosAtualizacao,
-  buscarAtas,
-  buscarAtasAtualizacao,
-} from "@/lib/pncp-api";
 import { daysAgoISO, todayISO } from "@/lib/utils";
 import { calcularPrioridade } from "@/lib/priority";
 
@@ -52,8 +42,6 @@ export function isAtaMode(m: SearchMode): boolean {
 function maxPageSize(mode: SearchMode): number {
   return isContratacaoMode(mode) ? MAX_PAGE_SIZE_CONTRATACOES : MAX_PAGE_SIZE_CONTRATOS;
 }
-
-const FETCH_CONCURRENCY = 5;
 
 // ─── State ───────────────────────────────────────────────────────────────────
 
@@ -151,10 +139,12 @@ function reducer(state: State, action: Action): State {
     }
     case "FETCH_PROGRESS": {
       const { items, progress } = action.payload;
+      const newAll = [...state.allResults, ...items];
+      const totalItems = state.totalApiResults;
       return {
         ...state,
-        allResults: [...state.allResults, ...items],
-        fetchProgress: progress,
+        allResults: newAll,
+        fetchProgress: { ...progress, loadedItems: newAll.length, totalItems },
       };
     }
     case "FETCH_DONE":
@@ -293,67 +283,130 @@ function applyFilters(allResults: ResultItem[], f: FilterState, sortByPriority: 
   }
 }
 
-// ─── Multi-page fetch helper ─────────────────────────────────────────────────
+// ─── Streaming fetch helper ──────────────────────────────────────────────────
 
-type FetchPageFn = (pagina: number, tamanhoPagina: number) => Promise<PaginaRetorno<ResultItem>>;
+const MODE_ENDPOINTS: Record<SearchMode, string> = {
+  publicacao: "v1/contratacoes/publicacao",
+  proposta: "v1/contratacoes/proposta",
+  atualizacao: "v1/contratacoes/atualizacao",
+  contratos: "v1/contratos",
+  contratos_atualizacao: "v1/contratos/atualizacao",
+  atas: "v1/atas",
+  atas_atualizacao: "v1/atas/atualizacao",
+};
 
-async function fetchAllPages(
-  fetchPage: FetchPageFn,
-  pageSize: number,
+function toApiDate(iso: string): string {
+  return iso.replace(/-/g, "");
+}
+
+async function fetchStream(
+  filters: FilterState,
   dispatch: Dispatch<Action>,
   signal: AbortSignal,
 ) {
-  // First page — discover totals
-  const first = await fetchPage(1, pageSize);
-  if (signal.aborted) return;
+  const mode = filters.searchMode;
+  const pgSize = maxPageSize(mode);
+  const endpoint = MODE_ENDPOINTS[mode];
 
-  const totalPages = first.totalPaginas || 1;
-  const totalItems = first.totalRegistros || first.data.length;
+  // Build query params for the stream endpoint
+  const params = new URLSearchParams();
+  params.set("endpoint", endpoint);
+  params.set("tamanhoPagina", String(pgSize));
 
-  dispatch({
-    type: "FETCH_FIRST_PAGE",
-    payload: { items: first.data, totalItems, totalPages },
-  });
+  // Date params
+  if (filters.dataInicial) params.set("dataInicial", toApiDate(filters.dataInicial));
+  if (filters.dataFinal) params.set("dataFinal", toApiDate(filters.dataFinal));
 
-  if (totalPages <= 1) {
-    dispatch({ type: "FETCH_DONE" });
-    return;
+  // Contratação-specific params
+  if (isContratacaoMode(mode)) {
+    if (filters.codigoModalidadeContratacao != null)
+      params.set("codigoModalidadeContratacao", String(filters.codigoModalidadeContratacao));
+    if (filters.codigoModoDisputa != null)
+      params.set("codigoModoDisputa", String(filters.codigoModoDisputa));
+    if (filters.codigoMunicipioIbge) params.set("codigoMunicipioIbge", filters.codigoMunicipioIbge);
   }
 
-  // Remaining pages in concurrent batches
-  let loadedPages = 1;
-  let loadedItems = first.data.length;
-  const remaining = Array.from({ length: totalPages - 1 }, (_, i) => i + 2);
+  // Shared params
+  if (filters.uf) params.set("uf", filters.uf);
+  if (filters.cnpj) {
+    const cnpjKey = isContratoMode(mode) ? "cnpjOrgao" : "cnpj";
+    params.set(cnpjKey, filters.cnpj);
+  }
+  if (filters.codigoUnidadeAdministrativa)
+    params.set("codigoUnidadeAdministrativa", filters.codigoUnidadeAdministrativa);
 
-  for (let i = 0; i < remaining.length; i += FETCH_CONCURRENCY) {
-    if (signal.aborted) return;
+  const url = `/api/pncp/stream?${params.toString()}`;
+  const resp = await fetch(url, { signal });
 
-    const batch = remaining.slice(i, i + FETCH_CONCURRENCY);
-    const results = await Promise.allSettled(
-      batch.map((p) => fetchPage(p, pageSize))
-    );
+  if (!resp.ok) {
+    const text = await resp.text();
+    throw new Error(`Stream error ${resp.status}: ${text}`);
+  }
 
-    if (signal.aborted) return;
+  const reader = resp.body?.getReader();
+  if (!reader) throw new Error("Streaming não suportado pelo navegador.");
 
-    const batchItems: ResultItem[] = [];
-    for (const r of results) {
-      if (r.status === "fulfilled" && r.value.data) {
-        batchItems.push(...r.value.data);
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let metaTotalItems = 0;
+  let metaTotalPages = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (signal.aborted) { reader.cancel(); return; }
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      const msg = JSON.parse(line);
+
+      switch (msg.type) {
+        case "meta":
+          metaTotalItems = msg.totalItems;
+          metaTotalPages = msg.totalPages;
+          break;
+
+        case "batch": {
+          const items = msg.items as ResultItem[];
+          if (!metaTotalPages) break;
+
+          if (msg.loadedPages === 1) {
+            dispatch({
+              type: "FETCH_FIRST_PAGE",
+              payload: { items, totalItems: metaTotalItems, totalPages: metaTotalPages },
+            });
+          } else {
+            dispatch({
+              type: "FETCH_PROGRESS",
+              payload: {
+                items,
+                progress: {
+                  loadedPages: msg.loadedPages,
+                  totalPages: metaTotalPages,
+                  loadedItems: 0, // computed in reducer from allResults.length
+                  totalItems: 0, // computed in reducer from totalApiResults
+                },
+              },
+            });
+          }
+          break;
+        }
+
+        case "done":
+          dispatch({ type: "FETCH_DONE" });
+          return;
+
+        case "error":
+          throw new Error(msg.message);
       }
     }
-
-    loadedPages += batch.length;
-    loadedItems += batchItems.length;
-
-    dispatch({
-      type: "FETCH_PROGRESS",
-      payload: {
-        items: batchItems,
-        progress: { loadedPages, totalPages, loadedItems, totalItems },
-      },
-    });
   }
 
+  // If stream ends without "done" message
   dispatch({ type: "FETCH_DONE" });
 }
 
@@ -397,105 +450,7 @@ export function LicitacoesProvider({ children }: { children: ReactNode }) {
       dispatch({ type: "FETCH_START" });
 
       try {
-        const mode = filters.searchMode;
-        const pgSize = maxPageSize(mode);
-
-        const optUnidade = filters.codigoUnidadeAdministrativa
-          ? { codigoUnidadeAdministrativa: filters.codigoUnidadeAdministrativa } : {};
-
-        const contratacaoCommon = {
-          ...optUnidade,
-          ...(filters.uf ? { uf: filters.uf } : {}),
-          ...(filters.codigoMunicipioIbge ? { codigoMunicipioIbge: filters.codigoMunicipioIbge } : {}),
-          ...(filters.cnpj ? { cnpj: filters.cnpj } : {}),
-          ...(filters.codigoModoDisputa != null ? { codigoModoDisputa: filters.codigoModoDisputa } : {}),
-        };
-
-        // Build a fetchPage function for the current mode
-        let fetchPage: FetchPageFn;
-
-        switch (mode) {
-          case "publicacao":
-            fetchPage = (pagina, tamanhoPagina) =>
-              buscarContratacoesPorPublicacao({
-                dataInicial: filters.dataInicial,
-                dataFinal: filters.dataFinal,
-                codigoModalidadeContratacao: filters.codigoModalidadeContratacao ?? 6,
-                pagina,
-                tamanhoPagina,
-                ...contratacaoCommon,
-              });
-            break;
-          case "proposta":
-            fetchPage = (pagina, tamanhoPagina) =>
-              buscarContratacoesPorProposta({
-                dataFinal: filters.dataFinal,
-                pagina,
-                tamanhoPagina,
-                ...(filters.codigoModalidadeContratacao != null
-                  ? { codigoModalidadeContratacao: filters.codigoModalidadeContratacao }
-                  : {}),
-                ...contratacaoCommon,
-              });
-            break;
-          case "atualizacao":
-            fetchPage = (pagina, tamanhoPagina) =>
-              buscarContratacoesPorAtualizacao({
-                dataInicial: filters.dataInicial,
-                dataFinal: filters.dataFinal,
-                codigoModalidadeContratacao: filters.codigoModalidadeContratacao ?? 6,
-                pagina,
-                tamanhoPagina,
-                ...contratacaoCommon,
-              });
-            break;
-          case "contratos":
-            fetchPage = (pagina, tamanhoPagina) =>
-              buscarContratos({
-                dataInicial: filters.dataInicial,
-                dataFinal: filters.dataFinal,
-                pagina,
-                tamanhoPagina,
-                ...optUnidade,
-                ...(filters.cnpj ? { cnpjOrgao: filters.cnpj } : {}),
-              });
-            break;
-          case "contratos_atualizacao":
-            fetchPage = (pagina, tamanhoPagina) =>
-              buscarContratosAtualizacao({
-                dataInicial: filters.dataInicial,
-                dataFinal: filters.dataFinal,
-                pagina,
-                tamanhoPagina,
-                ...optUnidade,
-                ...(filters.cnpj ? { cnpjOrgao: filters.cnpj } : {}),
-              });
-            break;
-          case "atas":
-            fetchPage = (pagina, tamanhoPagina) =>
-              buscarAtas({
-                dataInicial: filters.dataInicial,
-                dataFinal: filters.dataFinal,
-                pagina,
-                tamanhoPagina,
-                ...optUnidade,
-                ...(filters.cnpj ? { cnpj: filters.cnpj } : {}),
-              });
-            break;
-          case "atas_atualizacao":
-            fetchPage = (pagina, tamanhoPagina) =>
-              buscarAtasAtualizacao({
-                dataInicial: filters.dataInicial,
-                dataFinal: filters.dataFinal,
-                pagina,
-                tamanhoPagina,
-                ...optUnidade,
-                ...(filters.cnpj ? { cnpj: filters.cnpj } : {}),
-              });
-            break;
-        }
-
-        await fetchAllPages(fetchPage, pgSize, dispatch, ac.signal);
+        await fetchStream(filters, dispatch, ac.signal);
 
         if (!ac.signal.aborted) {
           toast.success("Todos os resultados carregados.");
