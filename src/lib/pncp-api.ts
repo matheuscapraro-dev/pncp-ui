@@ -8,7 +8,9 @@ import type {
   ContratacaoPropostaParams,
   ContratacaoAtualizacaoParams,
   ContratosParams,
+  ContratosAtualizacaoParams,
   AtasParams,
+  AtasAtualizacaoParams,
 } from "@/types/pncp";
 import { toApiDate } from "@/lib/utils";
 
@@ -120,11 +122,25 @@ export function buscarContratos(params: ContratosParams) {
   );
 }
 
+export function buscarContratosAtualizacao(params: ContratosAtualizacaoParams) {
+  return fetchPNCP<PaginaRetorno<ContratoDTO>>(
+    "v1/contratos/atualizacao",
+    convertDates({ ...params }) as Record<string, string | number | undefined>
+  );
+}
+
 // ─── Atas ────────────────────────────────────────────────────────────────────
 
 export function buscarAtas(params: AtasParams) {
   return fetchPNCP<PaginaRetorno<AtaRegistroPrecoDTO>>(
     "v1/atas",
+    convertDates({ ...params }) as Record<string, string | number | undefined>
+  );
+}
+
+export function buscarAtasAtualizacao(params: AtasAtualizacaoParams) {
+  return fetchPNCP<PaginaRetorno<AtaRegistroPrecoDTO>>(
+    "v1/atas/atualizacao",
     convertDates({ ...params }) as Record<string, string | number | undefined>
   );
 }

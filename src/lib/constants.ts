@@ -36,6 +36,25 @@ export const SITUACAO_COMPRA: Record<string, string> = {
   "4": "Suspensa",
 };
 
+export const ESFERAS = [
+  { id: "F", nome: "Federal" },
+  { id: "E", nome: "Estadual" },
+  { id: "M", nome: "Municipal" },
+  { id: "D", nome: "Distrital" },
+] as const;
+
+export const PODERES = [
+  { id: "E", nome: "Executivo" },
+  { id: "L", nome: "Legislativo" },
+  { id: "J", nome: "Judiciário" },
+] as const;
+
+export const TIPOS_INSTRUMENTO_CONVOCATORIO = [
+  { codigo: 1, nome: "Edital" },
+  { codigo: 2, nome: "Aviso de Contratação Direta" },
+  { codigo: 3, nome: "Ato que Autoriza Contratação Direta" },
+] as const;
+
 export const DEFAULT_PAGE_SIZE = 20;
 export const MIN_PAGE_SIZE = 10;
 export const MAX_PAGE_SIZE_CONTRATACOES = 50;

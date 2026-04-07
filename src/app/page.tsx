@@ -13,15 +13,15 @@ export default function HomePage() {
   const hasResults = state.results.length > 0 || state.loading;
 
   return (
-    <div className="mx-auto max-w-[1400px] space-y-6">
+    <div className="mx-auto max-w-[1400px] space-y-4 px-3 py-4 sm:space-y-6 sm:px-4 sm:py-6">
       <div className="flex items-start gap-3">
-        <div className="rounded-lg bg-primary/10 p-2">
+        <div className="hidden sm:block rounded-lg bg-primary/10 p-2">
           <FileText className="h-6 w-6 text-primary" />
         </div>
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Busca de Licitações</h1>
-          <p className="text-sm text-muted-foreground">
-            Consulte contratações públicas no Portal Nacional de Contratações Públicas (PNCP).
+          <h1 className="text-xl font-bold tracking-tight sm:text-2xl">Consulta PNCP</h1>
+          <p className="text-xs text-muted-foreground sm:text-sm">
+            Contratações, contratos e atas do Portal Nacional de Contratações Públicas.
           </p>
         </div>
       </div>

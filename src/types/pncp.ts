@@ -251,6 +251,17 @@ export interface ContratosParams {
   tamanhoPagina?: number;
   cnpjOrgao?: string;
   codigoUnidadeAdministrativa?: string;
+  usuarioId?: number;
+}
+
+export interface ContratosAtualizacaoParams {
+  dataInicial: string;
+  dataFinal: string;
+  pagina: number;
+  tamanhoPagina?: number;
+  cnpjOrgao?: string;
+  codigoUnidadeAdministrativa?: string;
+  usuarioId?: number;
 }
 
 export interface AtasParams {
@@ -262,9 +273,25 @@ export interface AtasParams {
   codigoUnidadeAdministrativa?: string;
 }
 
+export interface AtasAtualizacaoParams {
+  dataInicial: string;
+  dataFinal: string;
+  pagina: number;
+  tamanhoPagina?: number;
+  cnpj?: string;
+  codigoUnidadeAdministrativa?: string;
+}
+
 // ─── App-level types ─────────────────────────────────────────────────────────
 
-export type SearchMode = "publicacao" | "proposta" | "atualizacao";
+export type SearchMode =
+  | "publicacao"
+  | "proposta"
+  | "atualizacao"
+  | "contratos"
+  | "contratos_atualizacao"
+  | "atas"
+  | "atas_atualizacao";
 
 export interface FilterState {
   searchMode: SearchMode;
@@ -278,7 +305,9 @@ export interface FilterState {
   textoBusca: string;
   pagina: number;
   tamanhoPagina: number;
-  // Extended filters
+  // Server-side API param (all endpoints)
+  codigoUnidadeAdministrativa: string;
+  // Extended client-side filters (contratações)
   situacaoCompraId: string;
   srp: string; // "" | "true" | "false"
   valorMinimo: string;
@@ -286,6 +315,15 @@ export interface FilterState {
   // Keyword filters (comma-separated, client-side OR matching on objetoCompra)
   palavrasIncluir: string;
   palavrasExcluir: string;
+  // Additional client-side filters
+  esferaId: string;       // "" | "F" | "E" | "M" | "D"
+  poderId: string;        // "" | "E" | "L" | "J"
+  tipoInstrumentoConvocatorio: string; // filter by tipoInstrumentoConvocatorioCodigo
+  municipioNome: string;  // text match on unidadeOrgao.municipioNome
+  nomeOrgao: string;      // text match on orgaoEntidade.razaoSocial
+  hasLinkExterno: string;  // "" | "true" | "false"
+  valorHomologadoMinimo: string;
+  valorHomologadoMaximo: string;
 }
 
 export interface KpiData {
