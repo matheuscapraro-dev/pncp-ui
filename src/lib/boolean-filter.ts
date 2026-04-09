@@ -192,6 +192,21 @@ export function hasBooleanSyntax(query: string): boolean {
 }
 
 /**
+ * Compile a boolean keyword expression into a reusable matcher function.
+ * Tokenizes and parses only once; the returned closure just evaluates the AST.
+ *
+ * @param query  The user-entered expression
+ * @returns      A function `(text: string) => boolean`, or `null` if the query is empty.
+ */
+export function compileBooleanExpr(query: string): ((text: string) => boolean) | null {
+  if (!query || !query.trim()) return null;
+  const tokens = tokenize(query);
+  if (tokens.length === 0) return null;
+  const [ast] = parseExpr(tokens, 0);
+  return (text: string) => evalNode(ast, text);
+}
+
+/**
  * Evaluate a boolean keyword expression against a normalized text string.
  *
  * @param query  The user-entered expression (e.g. `(engenharia OR construção) AND NOT manutenção`)

@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 
 const PNCP_BASE = "https://pncp.gov.br/api/consulta";
 const SERVER_CONCURRENCY = 10;
+const FETCH_TIMEOUT_MS = 30_000; // 30s per PNCP request
 
 /**
  * Streaming PNCP fetcher.
@@ -46,9 +47,14 @@ export async function GET(request: NextRequest) {
   }
 
   async function fetchPage(page: number, signal: AbortSignal): Promise<{ data: unknown[]; totalRegistros: number; totalPaginas: number }> {
+    // Combine caller abort signal with a per-request timeout so a hung
+    // PNCP response never blocks the whole stream indefinitely.
+    const timeout = AbortSignal.timeout(FETCH_TIMEOUT_MS);
+    const combined = AbortSignal.any([signal, timeout]);
+
     const resp = await fetch(buildUrl(page), {
       headers: { Accept: "application/json" },
-      signal,
+      signal: combined,
     });
     if (resp.status === 204) return { data: [], totalRegistros: 0, totalPaginas: 0 };
     const text = await resp.text();

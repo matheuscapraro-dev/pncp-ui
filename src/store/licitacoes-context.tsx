@@ -24,7 +24,7 @@ import {
 } from "@/lib/constants";
 import { daysAgoISO, todayISO } from "@/lib/utils";
 import { calcularPrioridade } from "@/lib/priority";
-import { matchesBooleanExpr } from "@/lib/boolean-filter";
+import { compileBooleanExpr } from "@/lib/boolean-filter";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -176,6 +176,10 @@ function normalizeText(text: string): string {
 function applyFilters(allResults: ResultItem[], f: FilterState, sortByPriority: boolean): ResultItem[] {
   const mode = f.searchMode;
 
+  // Compile boolean expressions once (not per item)
+  const incMatcher = compileBooleanExpr(f.palavrasIncluir);
+  const excMatcher = compileBooleanExpr(f.palavrasExcluir);
+
   if (isContratacaoMode(mode)) {
     let items = allResults as CompraPublicacaoDTO[];
     const q = f.textoBusca.toLowerCase().trim();
@@ -205,12 +209,8 @@ function applyFilters(allResults: ResultItem[], f: FilterState, sortByPriority: 
     if (f.hasLinkExterno === "true") items = items.filter((c) => !!c.linkSistemaOrigem);
     else if (f.hasLinkExterno === "false") items = items.filter((c) => !c.linkSistemaOrigem);
 
-    if (f.palavrasIncluir.trim()) {
-      items = items.filter((c) => matchesBooleanExpr(f.palavrasIncluir, normalizeText(c.objetoCompra ?? "")));
-    }
-    if (f.palavrasExcluir.trim()) {
-      items = items.filter((c) => !matchesBooleanExpr(f.palavrasExcluir, normalizeText(c.objetoCompra ?? "")));
-    }
+    if (incMatcher) items = items.filter((c) => incMatcher(normalizeText(c.objetoCompra ?? "")));
+    if (excMatcher) items = items.filter((c) => !excMatcher(normalizeText(c.objetoCompra ?? "")));
 
     const vMin = f.valorMinimo ? parseFloat(f.valorMinimo) : null;
     const vMax = f.valorMaximo ? parseFloat(f.valorMaximo) : null;
@@ -242,8 +242,8 @@ function applyFilters(allResults: ResultItem[], f: FilterState, sortByPriority: 
     const vMax = f.valorMaximo ? parseFloat(f.valorMaximo) : null;
     if (vMin != null && !isNaN(vMin)) items = items.filter((c) => (c.valorInicial ?? 0) >= vMin);
     if (vMax != null && !isNaN(vMax)) items = items.filter((c) => (c.valorInicial ?? 0) <= vMax);
-    if (f.palavrasIncluir.trim()) items = items.filter((c) => matchesBooleanExpr(f.palavrasIncluir, normalizeText(c.objetoContrato ?? "")));
-    if (f.palavrasExcluir.trim()) items = items.filter((c) => !matchesBooleanExpr(f.palavrasExcluir, normalizeText(c.objetoContrato ?? "")));
+    if (incMatcher) items = items.filter((c) => incMatcher(normalizeText(c.objetoContrato ?? "")));
+    if (excMatcher) items = items.filter((c) => !excMatcher(normalizeText(c.objetoContrato ?? "")));
     return items;
   }
 
@@ -261,8 +261,8 @@ function applyFilters(allResults: ResultItem[], f: FilterState, sortByPriority: 
       const n = f.nomeOrgao.toLowerCase().trim();
       items = items.filter((c) => c.nomeOrgao?.toLowerCase().includes(n));
     }
-    if (f.palavrasIncluir.trim()) items = items.filter((c) => matchesBooleanExpr(f.palavrasIncluir, normalizeText(c.objetoContratacao ?? "")));
-    if (f.palavrasExcluir.trim()) items = items.filter((c) => !matchesBooleanExpr(f.palavrasExcluir, normalizeText(c.objetoContratacao ?? "")));
+    if (incMatcher) items = items.filter((c) => incMatcher(normalizeText(c.objetoContratacao ?? "")));
+    if (excMatcher) items = items.filter((c) => !excMatcher(normalizeText(c.objetoContratacao ?? "")));
     return items;
   }
 }
