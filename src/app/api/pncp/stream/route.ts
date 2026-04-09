@@ -1,10 +1,17 @@
 import { NextRequest } from "next/server";
 
 const PNCP_BASE = "https://pncp.gov.br/api/consulta";
-const SERVER_CONCURRENCY = 5;
+const SERVER_CONCURRENCY = 3;
 const FETCH_TIMEOUT_MS = 60_000; // 60s per PNCP request
-const MAX_RETRIES = 2;
+const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 1_000;
+const BATCH_DELAY_MS = 1_500; // delay between batches to avoid throttling
+const RETRY_CONCURRENCY = 2; // lower concurrency for retry pass
+const RETRY_BATCH_DELAY_MS = 3_000; // longer delay between retry batches
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
 
 /**
  * Streaming PNCP fetcher.
@@ -112,9 +119,10 @@ export async function GET(request: NextRequest) {
           return;
         }
 
-        // 2. Fetch remaining pages in server-side batches
+        // 2. Fetch remaining pages in server-side batches with delay
         const remaining = Array.from({ length: totalPages - 1 }, (_, i) => i + 2);
         let loadedPages = 1;
+        const failedPages: number[] = [];
 
         for (let i = 0; i < remaining.length; i += SERVER_CONCURRENCY) {
           if (abortController.signal.aborted) break;
@@ -127,14 +135,52 @@ export async function GET(request: NextRequest) {
           if (abortController.signal.aborted) break;
 
           const batchItems: unknown[] = [];
-          for (const r of results) {
+          for (let j = 0; j < results.length; j++) {
+            const r = results[j];
             if (r.status === "fulfilled" && r.value.data) {
               batchItems.push(...r.value.data);
+            } else if (r.status === "rejected") {
+              failedPages.push(batch[j]);
             }
           }
 
           loadedPages += batch.length;
           send({ type: "batch", items: batchItems, loadedPages, totalPages });
+
+          // Delay between batches to avoid PNCP throttling
+          const isLastBatch = i + SERVER_CONCURRENCY >= remaining.length;
+          if (!isLastBatch && !abortController.signal.aborted) {
+            await sleep(BATCH_DELAY_MS);
+          }
+        }
+
+        // 3. Retry failed pages with lower concurrency and longer delays
+        if (failedPages.length > 0 && !abortController.signal.aborted) {
+          for (let i = 0; i < failedPages.length; i += RETRY_CONCURRENCY) {
+            if (abortController.signal.aborted) break;
+
+            // Wait before each retry batch
+            await sleep(RETRY_BATCH_DELAY_MS);
+            if (abortController.signal.aborted) break;
+
+            const retryBatch = failedPages.slice(i, i + RETRY_CONCURRENCY);
+            const results = await Promise.allSettled(
+              retryBatch.map((p) => fetchPage(p, abortController.signal))
+            );
+
+            if (abortController.signal.aborted) break;
+
+            const retryItems: unknown[] = [];
+            for (const r of results) {
+              if (r.status === "fulfilled" && r.value.data) {
+                retryItems.push(...r.value.data);
+              }
+            }
+
+            if (retryItems.length > 0) {
+              send({ type: "batch", items: retryItems, loadedPages: totalPages, totalPages });
+            }
+          }
         }
 
         if (!abortController.signal.aborted) {
