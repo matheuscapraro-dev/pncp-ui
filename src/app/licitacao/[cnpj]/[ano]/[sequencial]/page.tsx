@@ -77,7 +77,7 @@ export default function LicitacaoDetalhePage({
 
   if (loading) {
     return (
-      <div className="mx-auto max-w-4xl space-y-4">
+      <div className="mx-auto max-w-4xl space-y-4 p-4 pt-16 sm:p-6 md:pt-6">
         <Skeleton className="h-8 w-64" />
         <Skeleton className="h-48 w-full" />
         <Skeleton className="h-48 w-full" />
@@ -87,7 +87,7 @@ export default function LicitacaoDetalhePage({
 
   if (error || !data) {
     return (
-      <div className="mx-auto max-w-4xl space-y-4">
+      <div className="mx-auto max-w-4xl space-y-4 p-4 pt-16 sm:p-6 md:pt-6">
         <Link href="/">
           <Button variant="ghost" size="sm">
             <ArrowLeft className="mr-1 h-4 w-4" /> Voltar
@@ -101,7 +101,7 @@ export default function LicitacaoDetalhePage({
   }
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6">
+    <div className="mx-auto max-w-4xl space-y-6 p-4 pt-16 sm:p-6 md:pt-6">
       <div className="flex items-center gap-4">
         <Link href="/">
           <Button variant="ghost" size="sm">

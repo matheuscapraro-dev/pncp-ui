@@ -13,7 +13,7 @@ export default function HomePage() {
   const hasResults = state.allResults.length > 0 || state.loading;
 
   return (
-    <div className="mx-auto max-w-[1400px] space-y-4 px-3 py-4 sm:space-y-6 sm:px-4 sm:py-6">
+    <div className="mx-auto max-w-[1400px] space-y-4 px-3 py-4 pt-16 sm:space-y-6 sm:px-4 sm:py-6 md:pt-6">
       <div className="flex items-start gap-3">
         <div className="hidden sm:block rounded-lg bg-primary/10 p-2">
           <FileText className="h-6 w-6 text-primary" />
