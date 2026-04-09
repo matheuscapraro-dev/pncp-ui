@@ -1,13 +1,13 @@
 import { NextRequest } from "next/server";
 
 const PNCP_BASE = "https://pncp.gov.br/api/consulta";
-const SERVER_CONCURRENCY = 3;
-const FETCH_TIMEOUT_MS = 60_000; // 60s per PNCP request
-const MAX_RETRIES = 3;
-const RETRY_DELAY_MS = 1_000;
-const BATCH_DELAY_MS = 1_500; // delay between batches to avoid throttling
-const RETRY_CONCURRENCY = 2; // lower concurrency for retry pass
-const RETRY_BATCH_DELAY_MS = 3_000; // longer delay between retry batches
+const SERVER_CONCURRENCY = 8;
+const FETCH_TIMEOUT_MS = 20_000; // 20s per PNCP request
+const MAX_RETRIES = 2;
+const RETRY_DELAY_MS = 500;
+const BATCH_DELAY_MS = 200; // delay between batches to avoid throttling
+const RETRY_CONCURRENCY = 4; // lower concurrency for retry pass
+const RETRY_BATCH_DELAY_MS = 1_000; // longer delay between retry batches
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
