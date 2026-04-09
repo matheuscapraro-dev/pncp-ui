@@ -504,16 +504,19 @@ export function SearchForm() {
             </p>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="space-y-1">
-                <Label className="text-xs">Incluir (mantém se contiver qualquer uma)</Label>
-                <Input placeholder="engenharia, construção, obra..." value={filters.palavrasIncluir}
+                <Label className="text-xs">Incluir (mantém se a expressão for verdadeira)</Label>
+                <Input placeholder={`engenharia, "serviço de limpeza" AND predial`} value={filters.palavrasIncluir}
                   onChange={(e) => updateFilter("palavrasIncluir", e.target.value)} className="h-8 text-sm" />
               </div>
               <div className="space-y-1">
-                <Label className="text-xs">Excluir (remove se contiver qualquer uma)</Label>
-                <Input placeholder="execução, manutenção..." value={filters.palavrasExcluir}
+                <Label className="text-xs">Excluir (remove se a expressão for verdadeira)</Label>
+                <Input placeholder={`manutenção OR "locação de veículos"`} value={filters.palavrasExcluir}
                   onChange={(e) => updateFilter("palavrasExcluir", e.target.value)} className="h-8 text-sm" />
               </div>
             </div>
+            <p className="mt-1.5 text-[10px] text-muted-foreground">
+              Use vírgula ou OR, AND, NOT, parênteses e &quot;aspas&quot; para frase exata. Ex: (engenharia OR construção) AND NOT manutenção
+            </p>
           </div>
         </div>
       )}

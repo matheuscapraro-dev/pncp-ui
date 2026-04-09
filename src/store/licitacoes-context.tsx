@@ -24,6 +24,7 @@ import {
 } from "@/lib/constants";
 import { daysAgoISO, todayISO } from "@/lib/utils";
 import { calcularPrioridade } from "@/lib/priority";
+import { matchesBooleanExpr } from "@/lib/boolean-filter";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -164,12 +165,7 @@ function reducer(state: State, action: Action): State {
   }
 }
 
-// ─── Keyword helpers ─────────────────────────────────────────────────────────
-
-function parseKeywords(raw: string): string[] {
-  return raw.split(",").map((k) => k.trim().toLowerCase()).filter(Boolean)
-    .map((k) => k.normalize("NFD").replace(/[\u0300-\u036f]/g, ""));
-}
+// ─── Text helpers ────────────────────────────────────────────────────────────
 
 function normalizeText(text: string): string {
   return text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -209,19 +205,11 @@ function applyFilters(allResults: ResultItem[], f: FilterState, sortByPriority: 
     if (f.hasLinkExterno === "true") items = items.filter((c) => !!c.linkSistemaOrigem);
     else if (f.hasLinkExterno === "false") items = items.filter((c) => !c.linkSistemaOrigem);
 
-    const incKws = parseKeywords(f.palavrasIncluir);
-    if (incKws.length > 0) {
-      items = items.filter((c) => {
-        const obj = normalizeText(c.objetoCompra ?? "");
-        return incKws.some((kw) => obj.includes(kw));
-      });
+    if (f.palavrasIncluir.trim()) {
+      items = items.filter((c) => matchesBooleanExpr(f.palavrasIncluir, normalizeText(c.objetoCompra ?? "")));
     }
-    const excKws = parseKeywords(f.palavrasExcluir);
-    if (excKws.length > 0) {
-      items = items.filter((c) => {
-        const obj = normalizeText(c.objetoCompra ?? "");
-        return !excKws.some((kw) => obj.includes(kw));
-      });
+    if (f.palavrasExcluir.trim()) {
+      items = items.filter((c) => !matchesBooleanExpr(f.palavrasExcluir, normalizeText(c.objetoCompra ?? "")));
     }
 
     const vMin = f.valorMinimo ? parseFloat(f.valorMinimo) : null;
@@ -254,10 +242,8 @@ function applyFilters(allResults: ResultItem[], f: FilterState, sortByPriority: 
     const vMax = f.valorMaximo ? parseFloat(f.valorMaximo) : null;
     if (vMin != null && !isNaN(vMin)) items = items.filter((c) => (c.valorInicial ?? 0) >= vMin);
     if (vMax != null && !isNaN(vMax)) items = items.filter((c) => (c.valorInicial ?? 0) <= vMax);
-    const incKws = parseKeywords(f.palavrasIncluir);
-    if (incKws.length > 0) items = items.filter((c) => { const o = normalizeText(c.objetoContrato ?? ""); return incKws.some((kw) => o.includes(kw)); });
-    const excKws = parseKeywords(f.palavrasExcluir);
-    if (excKws.length > 0) items = items.filter((c) => { const o = normalizeText(c.objetoContrato ?? ""); return !excKws.some((kw) => o.includes(kw)); });
+    if (f.palavrasIncluir.trim()) items = items.filter((c) => matchesBooleanExpr(f.palavrasIncluir, normalizeText(c.objetoContrato ?? "")));
+    if (f.palavrasExcluir.trim()) items = items.filter((c) => !matchesBooleanExpr(f.palavrasExcluir, normalizeText(c.objetoContrato ?? "")));
     return items;
   }
 
@@ -275,10 +261,8 @@ function applyFilters(allResults: ResultItem[], f: FilterState, sortByPriority: 
       const n = f.nomeOrgao.toLowerCase().trim();
       items = items.filter((c) => c.nomeOrgao?.toLowerCase().includes(n));
     }
-    const incKws = parseKeywords(f.palavrasIncluir);
-    if (incKws.length > 0) items = items.filter((c) => { const o = normalizeText(c.objetoContratacao ?? ""); return incKws.some((kw) => o.includes(kw)); });
-    const excKws = parseKeywords(f.palavrasExcluir);
-    if (excKws.length > 0) items = items.filter((c) => { const o = normalizeText(c.objetoContratacao ?? ""); return !excKws.some((kw) => o.includes(kw)); });
+    if (f.palavrasIncluir.trim()) items = items.filter((c) => matchesBooleanExpr(f.palavrasIncluir, normalizeText(c.objetoContratacao ?? "")));
+    if (f.palavrasExcluir.trim()) items = items.filter((c) => !matchesBooleanExpr(f.palavrasExcluir, normalizeText(c.objetoContratacao ?? "")));
     return items;
   }
 }
