@@ -1,8 +1,10 @@
 import { NextRequest } from "next/server";
 
 const PNCP_BASE = "https://pncp.gov.br/api/consulta";
-const SERVER_CONCURRENCY = 10;
-const FETCH_TIMEOUT_MS = 30_000; // 30s per PNCP request
+const SERVER_CONCURRENCY = 5;
+const FETCH_TIMEOUT_MS = 60_000; // 60s per PNCP request
+const MAX_RETRIES = 2;
+const RETRY_DELAY_MS = 1_000;
 
 /**
  * Streaming PNCP fetcher.
@@ -47,20 +49,40 @@ export async function GET(request: NextRequest) {
   }
 
   async function fetchPage(page: number, signal: AbortSignal): Promise<{ data: unknown[]; totalRegistros: number; totalPaginas: number }> {
-    // Combine caller abort signal with a per-request timeout so a hung
-    // PNCP response never blocks the whole stream indefinitely.
-    const timeout = AbortSignal.timeout(FETCH_TIMEOUT_MS);
-    const combined = AbortSignal.any([signal, timeout]);
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        const timeout = AbortSignal.timeout(FETCH_TIMEOUT_MS);
+        const combined = AbortSignal.any([signal, timeout]);
 
-    const resp = await fetch(buildUrl(page), {
-      headers: { Accept: "application/json" },
-      signal: combined,
-    });
-    if (resp.status === 204) return { data: [], totalRegistros: 0, totalPaginas: 0 };
-    const text = await resp.text();
-    if (!text || text.trim() === "") return { data: [], totalRegistros: 0, totalPaginas: 0 };
-    if (!resp.ok) throw new Error(`PNCP ${resp.status}: ${text.slice(0, 200)}`);
-    return JSON.parse(text);
+        const resp = await fetch(buildUrl(page), {
+          headers: { Accept: "application/json" },
+          signal: combined,
+        });
+        if (resp.status === 204) return { data: [], totalRegistros: 0, totalPaginas: 0 };
+        const text = await resp.text();
+        if (!text || text.trim() === "") return { data: [], totalRegistros: 0, totalPaginas: 0 };
+        if (!resp.ok) {
+          // Retry on server errors (5xx) and rate limits (429)
+          if ((resp.status >= 500 || resp.status === 429) && attempt < MAX_RETRIES) {
+            await new Promise((r) => setTimeout(r, RETRY_DELAY_MS * (attempt + 1)));
+            continue;
+          }
+          throw new Error(`PNCP ${resp.status}: ${text.slice(0, 200)}`);
+        }
+        return JSON.parse(text);
+      } catch (err) {
+        // Don't retry if the main signal was aborted (user cancelled)
+        if (signal.aborted) throw err;
+        // Retry on timeout / network errors
+        if (attempt < MAX_RETRIES) {
+          await new Promise((r) => setTimeout(r, RETRY_DELAY_MS * (attempt + 1)));
+          continue;
+        }
+        throw err;
+      }
+    }
+    // Should not reach here, but satisfy TS
+    return { data: [], totalRegistros: 0, totalPaginas: 0 };
   }
 
   const encoder = new TextEncoder();
