@@ -5,6 +5,27 @@ import {
 } from "@/lib/blob-storage";
 import type { Subscription, SubscriptionFilters } from "@/types/subscription";
 
+// ─── Render API trigger ──────────────────────────────────────────────────────
+
+async function triggerRenderCron() {
+  const apiKey = process.env.RENDER_API_KEY;
+  const serviceId = process.env.RENDER_SERVICE_ID;
+  if (!apiKey || !serviceId) return; // silently skip if not configured
+
+  try {
+    await fetch(`https://api.render.com/v1/services/${serviceId}/jobs`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      signal: AbortSignal.timeout(5_000),
+    });
+  } catch {
+    // Non-critical — the daily cron will catch up
+  }
+}
+
 // ─── GET /api/subscriptions — list all subscriptions ─────────────────────────
 
 export async function GET() {
@@ -49,6 +70,9 @@ export async function POST(request: NextRequest) {
     };
 
     await createSubscription(sub);
+
+    // Fire-and-forget: trigger the Render cron to process immediately
+    triggerRenderCron();
 
     return NextResponse.json(sub, { status: 201 });
   } catch (err) {
