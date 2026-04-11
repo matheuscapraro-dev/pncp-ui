@@ -1,0 +1,10 @@
+services:
+  - type: cron
+    name: pncp-subscription-worker
+    runtime: docker
+    dockerfilePath: ./worker/Dockerfile
+    dockerContext: ./worker
+    schedule: "0 9 * * *"  # 09:00 UTC = 06:00 BRT daily
+    envVars:
+      - key: BLOB_READ_WRITE_TOKEN
+        sync: false  # Set manually in Render dashboard

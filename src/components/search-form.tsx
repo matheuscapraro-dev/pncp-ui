@@ -40,6 +40,8 @@ import { toast } from "sonner";
 import { daysAgoISO, todayISO } from "@/lib/utils";
 import type { SearchMode } from "@/types/pncp";
 import { useFilterPresets } from "@/hooks/use-filter-presets";
+import { useSubscriptions } from "@/hooks/use-subscriptions";
+import { SubscribeDialog } from "@/components/subscribe-dialog";
 
 const DATE_PRESETS = [
   { label: "7d", days: 7 },
@@ -65,6 +67,7 @@ export function SearchForm() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [showAdvanced, setShowAdvanced] = useState(false);
   const { presets, savePreset, deletePreset } = useFilterPresets();
+  const { create: createSubscription } = useSubscriptions();
   const [activePresetId, setActivePresetId] = useState<string | null>(null);
   const [showSaveInput, setShowSaveInput] = useState(false);
   const [presetName, setPresetName] = useState("");
@@ -536,6 +539,8 @@ export function SearchForm() {
           onClick={() => { dispatch({ type: "RESET" }); setActivePresetId(null); }}>
           <RotateCcw className="h-3 w-3" /> Limpar
         </Button>
+
+        <SubscribeDialog filters={filters} onCreate={createSubscription} />
 
         <div className="ml-auto flex items-center gap-1.5">
           {showSaveInput ? (
