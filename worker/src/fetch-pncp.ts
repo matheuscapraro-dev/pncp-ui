@@ -30,20 +30,30 @@ export interface FetchAllResult {
   failedPages: number[];
 }
 
-async function fetchPage(url: string, attempt = 0): Promise<PageResult> {
+async function fetchPage(url: string, attempt = 0, label?: string): Promise<PageResult> {
+  const tag = label ? `${label} ` : "";
   for (let i = attempt; i < MAX_ATTEMPTS; i++) {
     try {
+      const t0 = Date.now();
       const resp = await fetch(url, {
         headers: { Accept: "application/json" },
         signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       });
+      const dt = Date.now() - t0;
 
-      if (resp.status === 204) return { data: [], totalRegistros: 0, totalPaginas: 0 };
+      if (resp.status === 204) {
+        console.log(`${tag}  fetch ${resp.status} (${dt}ms) — vazio`);
+        return { data: [], totalRegistros: 0, totalPaginas: 0 };
+      }
 
       const text = await resp.text();
-      if (!text || text.trim() === "") return { data: [], totalRegistros: 0, totalPaginas: 0 };
+      if (!text || text.trim() === "") {
+        console.log(`${tag}  fetch ${resp.status} (${dt}ms) — body vazio`);
+        return { data: [], totalRegistros: 0, totalPaginas: 0 };
+      }
 
       if (!resp.ok) {
+        console.warn(`${tag}  fetch ${resp.status} (${dt}ms) tentativa ${i + 1}/${MAX_ATTEMPTS}: ${text.slice(0, 120)}`);
         if ((resp.status >= 500 || resp.status === 429) && i < MAX_ATTEMPTS - 1) {
           await sleep(800 * (i + 1));
           continue;
@@ -51,8 +61,14 @@ async function fetchPage(url: string, attempt = 0): Promise<PageResult> {
         throw new Error(`PNCP ${resp.status}: ${text.slice(0, 200)}`);
       }
 
+      if (i > 0) {
+        console.log(`${tag}  fetch OK (${dt}ms) após ${i + 1} tentativas`);
+      }
+
       return JSON.parse(text);
     } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`${tag}  fetch erro tentativa ${i + 1}/${MAX_ATTEMPTS}: ${msg.slice(0, 150)}`);
       if (i < MAX_ATTEMPTS - 1) {
         await sleep(800 * (i + 1));
         continue;
@@ -85,6 +101,8 @@ async function fetchWaves(
       if (r.status === "fulfilled" && r.value.data) {
         allItems.push(...r.value.data);
       } else {
+        const reason = r.status === "rejected" ? (r.reason instanceof Error ? r.reason.message : String(r.reason)) : "no data";
+        console.warn(`  Página ${wave[j]} falhou: ${reason.slice(0, 120)}`);
         failed.push(wave[j]);
       }
       completed++;
@@ -105,11 +123,13 @@ export interface FetchParams {
   endpoint: string;
   params: Record<string, string>;
   pageSize?: number;
+  label?: string;
   onProgress?: (loaded: number, total: number) => void;
 }
 
 export async function fetchAllPages(opts: FetchParams): Promise<FetchAllResult> {
-  const { endpoint, params, pageSize = 50, onProgress } = opts;
+  const { endpoint, params, pageSize = 50, label, onProgress } = opts;
+  const tag = label ?? "";
 
   function buildUrl(page: number): string {
     const url = new URL(`${PNCP_BASE}/${endpoint}`);
@@ -122,13 +142,18 @@ export async function fetchAllPages(opts: FetchParams): Promise<FetchAllResult> 
   }
 
   // 1. Fetch first page to discover totals
-  const first = await fetchPage(buildUrl(1));
+  const firstUrl = buildUrl(1);
+  console.log(`${tag} Buscando página 1: ${firstUrl}`);
+  const first = await fetchPage(firstUrl, 0, label);
   const totalPages = first.totalPaginas || 1;
   const totalApiResults = first.totalRegistros || first.data.length;
+
+  console.log(`${tag} Página 1 OK → ${totalApiResults} registros em ${totalPages} páginas (${first.data.length} nesta página)`);
 
   onProgress?.(1, totalPages);
 
   if (totalPages <= 1) {
+    console.log(`${tag} Apenas 1 página, retornando ${first.data.length} itens`);
     return { items: first.data, totalApiResults, failedPages: [] };
   }
 
@@ -155,7 +180,9 @@ export async function fetchAllPages(opts: FetchParams): Promise<FetchAllResult> 
 
   // 4. Retry passes
   for (let pass = 0; pass < RETRY_PASSES && failedPages.length > 0; pass++) {
-    await sleep(RETRY_WAVE_DELAY_MS * Math.pow(2, pass));
+    const delay = RETRY_WAVE_DELAY_MS * Math.pow(2, pass);
+    console.log(`${tag} Retry pass ${pass + 1}/${RETRY_PASSES}: ${failedPages.length} páginas falhadas, aguardando ${delay}ms...`);
+    await sleep(delay);
 
     const retryUrls = new Map<number, string>();
     for (const p of failedPages) retryUrls.set(p, buildUrl(p));
@@ -163,7 +190,9 @@ export async function fetchAllPages(opts: FetchParams): Promise<FetchAllResult> 
     const result = await fetchWaves(retryUrls, RETRY_CONCURRENCY, RETRY_WAVE_DELAY_MS);
     allItems.push(...result.items);
     failedPages = result.failed;
+    console.log(`${tag} Retry pass ${pass + 1} concluído: ${result.failed.length} ainda falharam`);
   }
 
+  console.log(`${tag} fetchAllPages concluído: ${allItems.length} itens carregados, ${failedPages.length} páginas falharam`);
   return { items: allItems, totalApiResults, failedPages };
 }
