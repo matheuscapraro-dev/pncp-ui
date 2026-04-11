@@ -28,7 +28,7 @@ async function readBlob<T>(pathname: string): Promise<T | null> {
 
 async function writeBlob(pathname: string, data: unknown): Promise<string> {
   const blob = await put(pathname, JSON.stringify(data), {
-    access: "public",
+    access: "private",
     addRandomSuffix: false,
     contentType: "application/json",
   });
