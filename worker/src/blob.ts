@@ -7,14 +7,20 @@ import { put, list, del, get } from "@vercel/blob";
 import type {
   SubscriptionIndex,
   SubscriptionResultsEnvelope,
+  SubscriptionRawEnvelope,
   Subscription,
 } from "./types.js";
 
 const INDEX_PATH = "subscriptions/index.json";
 const RESULTS_PREFIX = "subscriptions/results/";
+const RAW_PREFIX = "subscriptions/raw/";
 
 function resultsPath(id: string): string {
   return `${RESULTS_PREFIX}${id}.json`;
+}
+
+function rawPath(id: string): string {
+  return `${RAW_PREFIX}${id}.json`;
 }
 
 async function readBlob<T>(pathname: string): Promise<T | null> {
@@ -51,8 +57,18 @@ export async function saveResults(
   await writeBlob(resultsPath(envelope.subscriptionId), envelope);
 }
 
+export async function saveRawResults(
+  envelope: SubscriptionRawEnvelope,
+): Promise<void> {
+  await writeBlob(rawPath(envelope.subscriptionId), envelope);
+}
+
 export async function deleteResults(id: string): Promise<void> {
   const { blobs } = await list({ prefix: resultsPath(id), limit: 1 });
   const blob = blobs.find((b) => b.pathname === resultsPath(id));
   if (blob) await del(blob.url);
+  // Also delete raw results
+  const { blobs: rawBlobs } = await list({ prefix: rawPath(id), limit: 1 });
+  const rawBlob = rawBlobs.find((b) => b.pathname === rawPath(id));
+  if (rawBlob) await del(rawBlob.url);
 }

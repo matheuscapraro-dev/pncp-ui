@@ -11,10 +11,10 @@
  *   6. Updates subscription metadata
  */
 
-import { loadSubscriptions, saveSubscriptions, saveResults } from "./blob.js";
+import { loadSubscriptions, saveSubscriptions, saveResults, saveRawResults } from "./blob.js";
 import { fetchAllPages } from "./fetch-pncp.js";
 import { applyFilters } from "./apply-filters.js";
-import type { Subscription, SubscriptionFilters, SubscriptionResultsEnvelope } from "./types.js";
+import type { Subscription, SubscriptionFilters, SubscriptionResultsEnvelope, SubscriptionRawEnvelope } from "./types.js";
 
 // ─── Crash handlers ──────────────────────────────────────────────────────────
 
@@ -246,11 +246,22 @@ async function processSubscription(sub: Subscription): Promise<Partial<Subscript
     const filtered = applyFilters(allItems, sub.filters);
     console.log(`${label} Após filtros: ${filtered.length} itens`);
 
-    // Free memory from unfiltered results
+    // Save raw results to Blob (for interactive filtering in UI)
+    console.log(`${label} Salvando dados brutos no Blob (${allItems.length} itens)...`);
+    const rawEnvelope: SubscriptionRawEnvelope = {
+      subscriptionId: sub.id,
+      refreshedAt: new Date().toISOString(),
+      totalApiResults,
+      items: allItems,
+    };
+    await saveRawResults(rawEnvelope);
+    console.log(`${label} Dados brutos salvos`);
+
+    // Free memory from raw results
     allItems = [];
 
-    // Save results to Blob
-    console.log(`${label} Salvando resultados no Blob...`);
+    // Save filtered results to Blob
+    console.log(`${label} Salvando resultados filtrados no Blob...`);
     const envelope: SubscriptionResultsEnvelope = {
       subscriptionId: sub.id,
       refreshedAt: new Date().toISOString(),

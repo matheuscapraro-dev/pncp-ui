@@ -65,3 +65,11 @@ export interface SubscriptionResultsEnvelope {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   items: any[];
 }
+
+export interface SubscriptionRawEnvelope {
+  subscriptionId: string;
+  refreshedAt: string;
+  totalApiResults: number;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  items: any[];
+}

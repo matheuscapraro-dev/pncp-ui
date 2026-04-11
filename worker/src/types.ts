@@ -64,3 +64,10 @@ export interface SubscriptionResultsEnvelope {
   filteredCount: number;
   items: unknown[];
 }
+
+export interface SubscriptionRawEnvelope {
+  subscriptionId: string;
+  refreshedAt: string;
+  totalApiResults: number;
+  items: unknown[];
+}

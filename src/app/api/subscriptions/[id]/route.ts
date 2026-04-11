@@ -4,14 +4,17 @@ import {
   updateSubscription,
   deleteSubscription,
   getSubscriptionResults,
+  getSubscriptionRawResults,
 } from "@/lib/blob-storage";
 
 type RouteParams = { params: Promise<{ id: string }> };
 
 // ─── GET /api/subscriptions/[id] — subscription + cached results ─────────────
+// Add ?raw=1 to also include raw (unfiltered) items for interactive filtering.
 
-export async function GET(_request: NextRequest, { params }: RouteParams) {
+export async function GET(request: NextRequest, { params }: RouteParams) {
   const { id } = await params;
+  const wantRaw = request.nextUrl.searchParams.get("raw") === "1";
 
   try {
     const sub = await getSubscription(id);
@@ -21,13 +24,20 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
 
     const results = await getSubscriptionResults(id);
 
-    return NextResponse.json({
+    const payload: Record<string, unknown> = {
       subscription: sub,
       results: results?.items ?? [],
       totalApiResults: results?.totalApiResults ?? 0,
       filteredCount: results?.filteredCount ?? 0,
       refreshedAt: results?.refreshedAt ?? null,
-    });
+    };
+
+    if (wantRaw) {
+      const raw = await getSubscriptionRawResults(id);
+      payload.rawItems = raw?.items ?? [];
+    }
+
+    return NextResponse.json(payload);
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Erro ao buscar inscrição";
     return NextResponse.json({ error: msg }, { status: 500 });

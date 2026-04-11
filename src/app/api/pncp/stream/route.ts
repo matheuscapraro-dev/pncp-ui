@@ -4,7 +4,7 @@ const PNCP_BASE = "https://pncp.gov.br/api/consulta";
 
 // ─── Tuning for 500+ page fetches ───────────────────────────────────────────
 const CONCURRENCY = 8;            // parallel requests per wave
-const FETCH_TIMEOUT_MS = 15_000;  // 15s timeout per individual request
+const FETCH_TIMEOUT_MS = 5_000;   // 5s timeout — PNCP responds in <1s when healthy
 const WAVE_DELAY_MS = 200;        // pause between concurrency waves
 const MAX_ATTEMPTS = 4;           // total attempts per page (1 initial + 3 retries)
 const RETRY_PASSES = 3;           // number of full retry sweeps for failures
@@ -77,7 +77,7 @@ export async function GET(request: NextRequest) {
         if (!text || text.trim() === "") return { data: [], totalRegistros: 0, totalPaginas: 0 };
 
         if (!resp.ok) {
-          if ((resp.status >= 500 || resp.status === 429 || resp.status === 400) && attempt < MAX_ATTEMPTS - 1) {
+          if ((resp.status >= 500 || resp.status === 429 || resp.status === 400 || resp.status === 422) && attempt < MAX_ATTEMPTS - 1) {
             await sleep(800 * (attempt + 1)); // 800ms, 1600ms, 2400ms
             continue;
           }

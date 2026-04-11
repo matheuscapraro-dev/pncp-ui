@@ -3,15 +3,21 @@ import type {
   Subscription,
   SubscriptionIndex,
   SubscriptionResultsEnvelope,
+  SubscriptionRawEnvelope,
 } from "@/types/subscription";
 
 // ─── Blob paths ──────────────────────────────────────────────────────────────
 
 const INDEX_PATH = "subscriptions/index.json";
 const RESULTS_PREFIX = "subscriptions/results/";
+const RAW_PREFIX = "subscriptions/raw/";
 
 function resultsPath(id: string): string {
   return `${RESULTS_PREFIX}${id}.json`;
+}
+
+function rawPath(id: string): string {
+  return `${RAW_PREFIX}${id}.json`;
 }
 
 // ─── Low-level helpers ───────────────────────────────────────────────────────
@@ -87,8 +93,9 @@ export async function deleteSubscription(id: string): Promise<boolean> {
     updatedAt: new Date().toISOString(),
   } satisfies SubscriptionIndex);
 
-  // Also delete cached results
+  // Also delete cached results and raw data
   await deleteBlob(resultsPath(id));
+  await deleteBlob(rawPath(id));
   return true;
 }
 
@@ -98,6 +105,12 @@ export async function getSubscriptionResults(
   id: string,
 ): Promise<SubscriptionResultsEnvelope | null> {
   return readBlob<SubscriptionResultsEnvelope>(resultsPath(id));
+}
+
+export async function getSubscriptionRawResults(
+  id: string,
+): Promise<SubscriptionRawEnvelope | null> {
+  return readBlob<SubscriptionRawEnvelope>(rawPath(id));
 }
 
 export async function saveSubscriptionResults(

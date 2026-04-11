@@ -1,12 +1,21 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -22,6 +31,8 @@ import {
 } from "@/components/ui/tooltip";
 import {
   ArrowLeft,
+  ChevronDown,
+  ChevronUp,
   Clock,
   Database,
   DollarSign,
@@ -29,19 +40,88 @@ import {
   FileText,
   Filter,
   Loader2,
+  RotateCcw,
+  SlidersHorizontal,
   Trash2,
 } from "lucide-react";
-import { formatCurrency, formatDate, formatDateTime, formatNumber, formatCnpj } from "@/lib/utils";
+import { formatCurrency, formatDate, formatDateTime, formatNumber } from "@/lib/utils";
 import { toast } from "sonner";
-import type { Subscription } from "@/types/subscription";
+import { applySubscriptionFilters } from "@/lib/subscription-filters";
+import {
+  SITUACAO_COMPRA,
+  ESFERAS,
+  PODERES,
+  TIPOS_INSTRUMENTO_CONVOCATORIO,
+} from "@/lib/constants";
+import type { Subscription, SubscriptionFilters } from "@/types/subscription";
 
 interface SubscriptionData {
   subscription: Subscription;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   results: any[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  rawItems: any[];
   totalApiResults: number;
   filteredCount: number;
   refreshedAt: string | null;
+}
+
+/** Subset of SubscriptionFilters that can be changed interactively */
+interface LocalFilters {
+  palavrasIncluir: string;
+  palavrasExcluir: string;
+  situacaoCompraId: string;
+  srp: string;
+  esferaId: string;
+  poderId: string;
+  tipoInstrumentoConvocatorio: string;
+  municipioNome: string;
+  nomeOrgao: string;
+  hasLinkExterno: string;
+  valorMinimo: string;
+  valorMaximo: string;
+  valorHomologadoMinimo: string;
+  valorHomologadoMaximo: string;
+}
+
+const EMPTY_FILTERS: LocalFilters = {
+  palavrasIncluir: "",
+  palavrasExcluir: "",
+  situacaoCompraId: "",
+  srp: "",
+  esferaId: "",
+  poderId: "",
+  tipoInstrumentoConvocatorio: "",
+  municipioNome: "",
+  nomeOrgao: "",
+  hasLinkExterno: "",
+  valorMinimo: "",
+  valorMaximo: "",
+  valorHomologadoMinimo: "",
+  valorHomologadoMaximo: "",
+};
+
+function filtersFromSubscription(f: SubscriptionFilters): LocalFilters {
+  return {
+    palavrasIncluir: f.palavrasIncluir ?? "",
+    palavrasExcluir: f.palavrasExcluir ?? "",
+    situacaoCompraId: f.situacaoCompraId ?? "",
+    srp: f.srp ?? "",
+    esferaId: f.esferaId ?? "",
+    poderId: f.poderId ?? "",
+    tipoInstrumentoConvocatorio: f.tipoInstrumentoConvocatorio ?? "",
+    municipioNome: f.municipioNome ?? "",
+    nomeOrgao: f.nomeOrgao ?? "",
+    hasLinkExterno: f.hasLinkExterno ?? "",
+    valorMinimo: f.valorMinimo ?? "",
+    valorMaximo: f.valorMaximo ?? "",
+    valorHomologadoMinimo: f.valorHomologadoMinimo ?? "",
+    valorHomologadoMaximo: f.valorHomologadoMaximo ?? "",
+  };
+}
+
+function countActiveFilters(f: LocalFilters): number {
+  return Object.values(f).filter((v) => v !== "").length;
 }
 
 function timeAgo(iso: string): string {
@@ -188,6 +268,252 @@ function AtaRow({ item }: { item: any }) {
   );
 }
 
+// ─── Filter panel ────────────────────────────────────────────────────────────
+
+function FilterPanel({
+  filters,
+  onChange,
+  onReset,
+  isContratacao,
+  expanded,
+  onToggle,
+}: {
+  filters: LocalFilters;
+  onChange: (f: LocalFilters) => void;
+  onReset: () => void;
+  isContratacao: boolean;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  const set = (key: keyof LocalFilters, value: string) =>
+    onChange({ ...filters, [key]: value });
+
+  const activeCount = countActiveFilters(filters);
+
+  return (
+    <Card>
+      <button
+        onClick={onToggle}
+        className="flex w-full items-center justify-between p-3 text-left hover:bg-muted/50 transition-colors"
+      >
+        <div className="flex items-center gap-2">
+          <SlidersHorizontal className="h-4 w-4 text-muted-foreground" />
+          <span className="text-sm font-medium">Filtros interativos</span>
+          {activeCount > 0 && (
+            <Badge variant="secondary" className="text-[10px]">
+              {activeCount} ativo{activeCount > 1 ? "s" : ""}
+            </Badge>
+          )}
+        </div>
+        {expanded ? (
+          <ChevronUp className="h-4 w-4 text-muted-foreground" />
+        ) : (
+          <ChevronDown className="h-4 w-4 text-muted-foreground" />
+        )}
+      </button>
+
+      {expanded && (
+        <CardContent className="border-t p-3 pt-3 space-y-4">
+          {/* Keywords */}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="space-y-1">
+              <Label className="text-xs">Palavras-chave (incluir)</Label>
+              <Input
+                placeholder='engenharia OR "serviço de limpeza"'
+                value={filters.palavrasIncluir}
+                onChange={(e) => set("palavrasIncluir", e.target.value)}
+                className="h-8 text-xs"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Palavras-chave (excluir)</Label>
+              <Input
+                placeholder="material, alimento"
+                value={filters.palavrasExcluir}
+                onChange={(e) => set("palavrasExcluir", e.target.value)}
+                className="h-8 text-xs"
+              />
+            </div>
+          </div>
+
+          {/* Órgão / Município */}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="space-y-1">
+              <Label className="text-xs">Nome do órgão</Label>
+              <Input
+                placeholder="Filtrar por razão social"
+                value={filters.nomeOrgao}
+                onChange={(e) => set("nomeOrgao", e.target.value)}
+                className="h-8 text-xs"
+              />
+            </div>
+            {isContratacao && (
+              <div className="space-y-1">
+                <Label className="text-xs">Município</Label>
+                <Input
+                  placeholder="Filtrar por município"
+                  value={filters.municipioNome}
+                  onChange={(e) => set("municipioNome", e.target.value)}
+                  className="h-8 text-xs"
+                />
+              </div>
+            )}
+          </div>
+
+          {/* Valor */}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div className="space-y-1">
+              <Label className="text-xs">Valor mín.</Label>
+              <Input
+                type="number"
+                placeholder="0"
+                value={filters.valorMinimo}
+                onChange={(e) => set("valorMinimo", e.target.value)}
+                className="h-8 text-xs"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Valor máx.</Label>
+              <Input
+                type="number"
+                placeholder="∞"
+                value={filters.valorMaximo}
+                onChange={(e) => set("valorMaximo", e.target.value)}
+                className="h-8 text-xs"
+              />
+            </div>
+            {isContratacao && (
+              <>
+                <div className="space-y-1">
+                  <Label className="text-xs">Homologado mín.</Label>
+                  <Input
+                    type="number"
+                    placeholder="0"
+                    value={filters.valorHomologadoMinimo}
+                    onChange={(e) => set("valorHomologadoMinimo", e.target.value)}
+                    className="h-8 text-xs"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Homologado máx.</Label>
+                  <Input
+                    type="number"
+                    placeholder="∞"
+                    value={filters.valorHomologadoMaximo}
+                    onChange={(e) => set("valorHomologadoMaximo", e.target.value)}
+                    className="h-8 text-xs"
+                  />
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* Selects (contratação only) */}
+          {isContratacao && (
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              <div className="space-y-1">
+                <Label className="text-xs">Situação</Label>
+                <Select value={filters.situacaoCompraId} onValueChange={(v) => set("situacaoCompraId", v === "__all__" ? "" : v)}>
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue placeholder="Todas" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__all__">Todas</SelectItem>
+                    {Object.entries(SITUACAO_COMPRA).map(([id, nome]) => (
+                      <SelectItem key={id} value={id}>{nome}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-xs">SRP</Label>
+                <Select value={filters.srp} onValueChange={(v) => set("srp", v === "__all__" ? "" : v)}>
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue placeholder="Todos" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__all__">Todos</SelectItem>
+                    <SelectItem value="true">Sim</SelectItem>
+                    <SelectItem value="false">Não</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-xs">Esfera</Label>
+                <Select value={filters.esferaId} onValueChange={(v) => set("esferaId", v === "__all__" ? "" : v)}>
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue placeholder="Todas" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__all__">Todas</SelectItem>
+                    {ESFERAS.map((e) => (
+                      <SelectItem key={e.id} value={e.id}>{e.nome}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-xs">Poder</Label>
+                <Select value={filters.poderId} onValueChange={(v) => set("poderId", v === "__all__" ? "" : v)}>
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue placeholder="Todos" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__all__">Todos</SelectItem>
+                    {PODERES.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>{p.nome}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-xs">Instrumento</Label>
+                <Select value={filters.tipoInstrumentoConvocatorio} onValueChange={(v) => set("tipoInstrumentoConvocatorio", v === "__all__" ? "" : v)}>
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue placeholder="Todos" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__all__">Todos</SelectItem>
+                    {TIPOS_INSTRUMENTO_CONVOCATORIO.map((t) => (
+                      <SelectItem key={t.codigo} value={String(t.codigo)}>{t.nome}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-xs">Link externo</Label>
+                <Select value={filters.hasLinkExterno} onValueChange={(v) => set("hasLinkExterno", v === "__all__" ? "" : v)}>
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue placeholder="Todos" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__all__">Todos</SelectItem>
+                    <SelectItem value="true">Com link</SelectItem>
+                    <SelectItem value="false">Sem link</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          )}
+
+          {/* Reset */}
+          <div className="flex justify-end">
+            <Button variant="ghost" size="sm" onClick={onReset} className="gap-1.5 text-xs">
+              <RotateCcw className="h-3 w-3" />
+              Limpar filtros
+            </Button>
+          </div>
+        </CardContent>
+      )}
+    </Card>
+  );
+}
+
 // ─── Page sizes ──────────────────────────────────────────────────────────────
 
 const PAGE_SIZE = 50;
@@ -200,11 +526,13 @@ export default function SubscriptionResultsPage() {
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [deleting, setDeleting] = useState(false);
+  const [localFilters, setLocalFilters] = useState<LocalFilters>(EMPTY_FILTERS);
+  const [filtersExpanded, setFiltersExpanded] = useState(false);
 
   useEffect(() => {
     async function load() {
       try {
-        const resp = await fetch(`/api/subscriptions/${params.id}`);
+        const resp = await fetch(`/api/subscriptions/${params.id}?raw=1`);
         if (resp.status === 404) {
           setError("Inscrição não encontrada.");
           return;
@@ -214,7 +542,9 @@ export default function SubscriptionResultsPage() {
           setError(body.error || "Erro ao carregar inscrição");
           return;
         }
-        setData(await resp.json());
+        const json = await resp.json();
+        setData(json);
+        setLocalFilters(filtersFromSubscription(json.subscription.filters));
       } catch {
         setError("Erro de conexão.");
       } finally {
@@ -239,6 +569,29 @@ export default function SubscriptionResultsPage() {
       setDeleting(false);
     }
   }
+
+  const sub = data?.subscription;
+  const mode = sub?.filters.searchMode ?? "publicacao";
+  const isContratacao = mode === "publicacao" || mode === "proposta" || mode === "atualizacao";
+  const isContrato = mode === "contratos" || mode === "contratos_atualizacao";
+
+  const hasRawData = (data?.rawItems?.length ?? 0) > 0;
+  const sourceItems = hasRawData ? data!.rawItems : data?.results ?? [];
+
+  const filteredResults = useMemo(() => {
+    if (!data || sourceItems.length === 0) return [];
+    return applySubscriptionFilters(sourceItems, { searchMode: mode, ...localFilters });
+  }, [data, sourceItems, mode, localFilters]);
+
+  const handleFilterChange = useCallback((f: LocalFilters) => {
+    setLocalFilters(f);
+    setPage(1);
+  }, []);
+
+  const handleFilterReset = useCallback(() => {
+    setLocalFilters(EMPTY_FILTERS);
+    setPage(1);
+  }, []);
 
   // ─── Loading state ──────────────────────────────────────────────────────────
   if (loading) {
@@ -270,21 +623,18 @@ export default function SubscriptionResultsPage() {
     );
   }
 
-  const { subscription: sub, results, totalApiResults, filteredCount, refreshedAt } = data;
-  const mode = sub.filters.searchMode;
-  const isContratacao = mode === "publicacao" || mode === "proposta" || mode === "atualizacao";
-  const isContrato = mode === "contratos" || mode === "contratos_atualizacao";
+  const { totalApiResults, refreshedAt } = data;
 
   // Pagination
-  const totalPages = Math.max(1, Math.ceil(results.length / PAGE_SIZE));
-  const displayItems = results.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const totalPages = Math.max(1, Math.ceil(filteredResults.length / PAGE_SIZE));
+  const displayItems = filteredResults.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   // KPI values
   let valorTotal = 0;
   if (isContratacao) {
-    valorTotal = results.reduce((s: number, c: { valorTotalEstimado?: number }) => s + (c.valorTotalEstimado ?? 0), 0);
+    valorTotal = filteredResults.reduce((s: number, c: { valorTotalEstimado?: number }) => s + (c.valorTotalEstimado ?? 0), 0);
   } else if (isContrato) {
-    valorTotal = results.reduce((s: number, c: { valorInicial?: number }) => s + (c.valorInicial ?? 0), 0);
+    valorTotal = filteredResults.reduce((s: number, c: { valorInicial?: number }) => s + (c.valorInicial ?? 0), 0);
   }
 
   return (
@@ -298,9 +648,9 @@ export default function SubscriptionResultsPage() {
               Consulta
             </Link>
           </Button>
-          <h1 className="text-xl font-bold tracking-tight sm:text-2xl">{sub.nome}</h1>
+          <h1 className="text-xl font-bold tracking-tight sm:text-2xl">{sub!.nome}</h1>
           <div className="flex flex-wrap items-center gap-2">
-            <StatusBadge sub={sub} />
+            <StatusBadge sub={sub!} />
             {refreshedAt && (
               <span className="flex items-center gap-1 text-xs text-muted-foreground">
                 <Clock className="h-3 w-3" />
@@ -343,7 +693,12 @@ export default function SubscriptionResultsPage() {
             </div>
           </CardHeader>
           <CardContent className="p-3 pt-0">
-            <div className="text-lg font-bold">{formatNumber(results.length)}</div>
+            <div className="text-lg font-bold">{formatNumber(filteredResults.length)}</div>
+            {hasRawData && (
+              <p className="text-[10px] text-muted-foreground mt-0.5">
+                de {formatNumber(sourceItems.length)} brutos
+              </p>
+            )}
           </CardContent>
         </Card>
 
@@ -369,14 +724,14 @@ export default function SubscriptionResultsPage() {
             </div>
           </CardHeader>
           <CardContent className="p-3 pt-0">
-            <div className="text-lg font-bold">{sub.filters.diasRetroativos}d</div>
+            <div className="text-lg font-bold">{sub!.filters.diasRetroativos}d</div>
             <p className="mt-0.5 text-[10px] text-muted-foreground">dias retroativos</p>
           </CardContent>
         </Card>
       </div>
 
       {/* Pending state */}
-      {sub.status === "pending" && (
+      {sub!.status === "pending" && (
         <Card>
           <CardContent className="flex flex-col items-center justify-center p-8 text-center">
             <Loader2 className="h-8 w-8 animate-spin text-muted-foreground mb-3" />
@@ -389,17 +744,29 @@ export default function SubscriptionResultsPage() {
       )}
 
       {/* Error state */}
-      {sub.status === "error" && sub.lastError && (
+      {sub!.status === "error" && sub!.lastError && (
         <Card className="border-destructive">
           <CardContent className="p-4">
             <p className="text-sm font-medium text-destructive">Erro na última atualização:</p>
-            <p className="text-sm text-muted-foreground mt-1">{sub.lastError}</p>
+            <p className="text-sm text-muted-foreground mt-1">{sub!.lastError}</p>
           </CardContent>
         </Card>
       )}
 
+      {/* Interactive filters */}
+      {sourceItems.length > 0 && (
+        <FilterPanel
+          filters={localFilters}
+          onChange={handleFilterChange}
+          onReset={handleFilterReset}
+          isContratacao={isContratacao}
+          expanded={filtersExpanded}
+          onToggle={() => setFiltersExpanded((e) => !e)}
+        />
+      )}
+
       {/* Results table */}
-      {results.length > 0 && (
+      {filteredResults.length > 0 && (
         <Card>
           <CardContent className="p-0">
             <div className="overflow-auto">
@@ -452,7 +819,7 @@ export default function SubscriptionResultsPage() {
             {totalPages > 1 && (
               <div className="flex items-center justify-between border-t px-4 py-3">
                 <p className="text-xs text-muted-foreground">
-                  Página {page} de {totalPages} · {formatNumber(results.length)} resultados
+                  Página {page} de {totalPages} · {formatNumber(filteredResults.length)} resultados
                 </p>
                 <div className="flex gap-1">
                   <Button
@@ -478,14 +845,30 @@ export default function SubscriptionResultsPage() {
         </Card>
       )}
 
-      {/* Empty state (after sync but no results) */}
-      {sub.status === "ready" && results.length === 0 && (
+      {/* Empty state (after sync but no results matching filters) */}
+      {sub!.status === "ready" && filteredResults.length === 0 && sourceItems.length > 0 && (
+        <Card>
+          <CardContent className="flex flex-col items-center justify-center p-8 text-center">
+            <Filter className="h-8 w-8 text-muted-foreground mb-3" />
+            <p className="font-medium">Nenhum resultado com estes filtros</p>
+            <p className="text-sm text-muted-foreground mt-1">
+              {formatNumber(sourceItems.length)} itens brutos disponíveis. Ajuste os filtros para ver resultados.
+            </p>
+            <Button variant="outline" size="sm" className="mt-3 gap-1.5" onClick={handleFilterReset}>
+              <RotateCcw className="h-3 w-3" />
+              Limpar filtros
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {sub!.status === "ready" && sourceItems.length === 0 && (
         <Card>
           <CardContent className="flex flex-col items-center justify-center p-8 text-center">
             <FileText className="h-8 w-8 text-muted-foreground mb-3" />
             <p className="font-medium">Nenhum resultado encontrado</p>
             <p className="text-sm text-muted-foreground mt-1">
-              A última sincronização não encontrou itens que correspondam aos filtros.
+              A última sincronização não encontrou itens que correspondam aos parâmetros da API.
             </p>
           </CardContent>
         </Card>

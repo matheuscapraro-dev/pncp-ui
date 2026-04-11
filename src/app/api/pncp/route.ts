@@ -37,7 +37,7 @@ export async function GET(request: NextRequest) {
   try {
     const resp = await fetch(upstream.toString(), {
       headers: { Accept: "application/json" },
-      signal: AbortSignal.timeout(15_000),
+      signal: AbortSignal.timeout(5_000),
     });
 
     // 204 No Content — return empty pagination envelope
