@@ -102,8 +102,10 @@ export function SubscribeDialog({ filters, onCreate }: SubscribeDialogProps) {
         <form onSubmit={handleSubmit} className="mt-6 space-y-4 px-1">
           <p className="text-sm text-muted-foreground">
             Os filtros atuais serão salvos. Um worker buscará automaticamente os
-            resultados <strong>1 vez por dia</strong> e você poderá vê-los
-            instantaneamente ao abrir o app.
+            resultados <strong>1 vez por dia</strong>, sempre considerando os
+            últimos <strong>{dias} dias</strong> a partir da data de execução
+            (janela móvel). Você poderá ver os resultados instantaneamente ao
+            abrir o app.
           </p>
 
           <div className="rounded-md border bg-muted/50 p-3 text-xs space-y-1.5">
@@ -111,7 +113,7 @@ export function SubscribeDialog({ filters, onCreate }: SubscribeDialogProps) {
               <strong>Modo:</strong> {filters.searchMode}
             </p>
             <p>
-              <strong>Janela:</strong> últimos {dias} dias
+              <strong>Janela móvel:</strong> últimos {dias} dias (recalculado a cada execução)
             </p>
             {filters.palavrasIncluir && (
               <p>

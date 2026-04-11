@@ -718,14 +718,14 @@ export default function SubscriptionResultsPage() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 p-3 pb-1">
-            <CardTitle className="text-[11px] font-medium text-muted-foreground">Janela</CardTitle>
+            <CardTitle className="text-[11px] font-medium text-muted-foreground">Janela Móvel</CardTitle>
             <div className="rounded-md bg-violet-50 dark:bg-violet-950/30 p-1">
               <Clock className="h-3.5 w-3.5 text-violet-600 dark:text-violet-400" />
             </div>
           </CardHeader>
           <CardContent className="p-3 pt-0">
             <div className="text-lg font-bold">{sub!.filters.diasRetroativos}d</div>
-            <p className="mt-0.5 text-[10px] text-muted-foreground">dias retroativos</p>
+            <p className="mt-0.5 text-[10px] text-muted-foreground">últimos dias (recalculado diariamente)</p>
           </CardContent>
         </Card>
       </div>
