@@ -1,4 +1,4 @@
-import { put, list, del } from "@vercel/blob";
+import { put, list, del, get } from "@vercel/blob";
 import type {
   Subscription,
   SubscriptionIndex,
@@ -17,19 +17,17 @@ function resultsPath(id: string): string {
 // ─── Low-level helpers ───────────────────────────────────────────────────────
 
 async function readBlob<T>(pathname: string): Promise<T | null> {
-  const { blobs } = await list({ prefix: pathname, limit: 1 });
-  const blob = blobs.find((b) => b.pathname === pathname);
-  if (!blob) return null;
-
-  const resp = await fetch(blob.url);
-  if (!resp.ok) return null;
-  return resp.json() as Promise<T>;
+  const result = await get(pathname, { access: "private" });
+  if (!result || result.statusCode !== 200 || !result.stream) return null;
+  const text = await new Response(result.stream).text();
+  return JSON.parse(text) as T;
 }
 
 async function writeBlob(pathname: string, data: unknown): Promise<string> {
   const blob = await put(pathname, JSON.stringify(data), {
     access: "private",
     addRandomSuffix: false,
+    allowOverwrite: true,
     contentType: "application/json",
   });
   return blob.url;
