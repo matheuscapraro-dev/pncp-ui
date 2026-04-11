@@ -201,7 +201,7 @@ export interface AtaRegistroPrecoDTO {
 
 // ─── Enums ───────────────────────────────────────────────────────────────────
 
-export type SituacaoCompraId = "1" | "2" | "3" | "4";
+export type SituacaoCompraId = number;
 
 export type TipoPessoa = "PJ" | "PF" | "PE";
 

@@ -189,7 +189,7 @@ function applyFilters(allResults: ResultItem[], f: FilterState, sortByPriority: 
         c.orgaoEntidade?.razaoSocial?.toLowerCase().includes(q) ||
         c.unidadeOrgao?.nomeUnidade?.toLowerCase().includes(q));
     }
-    if (f.situacaoCompraId) items = items.filter((c) => c.situacaoCompraId === f.situacaoCompraId);
+    if (f.situacaoCompraId) items = items.filter((c) => String(c.situacaoCompraId) === f.situacaoCompraId);
     if (f.srp === "true") items = items.filter((c) => c.srp);
     else if (f.srp === "false") items = items.filter((c) => !c.srp);
     if (f.esferaId) items = items.filter((c) => c.orgaoEntidade?.esferaId === f.esferaId);
