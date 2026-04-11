@@ -1,11 +1,13 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { usePathname } from "next/navigation";
 import type { Subscription } from "@/types/subscription";
 
 export function useSubscriptions() {
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [loading, setLoading] = useState(true);
+  const pathname = usePathname();
 
   const refresh = useCallback(async () => {
     try {
@@ -23,7 +25,7 @@ export function useSubscriptions() {
 
   useEffect(() => {
     refresh();
-  }, [refresh]);
+  }, [refresh, pathname]);
 
   const create = useCallback(
     async (nome: string, filters: Subscription["filters"]) => {

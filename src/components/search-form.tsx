@@ -109,10 +109,9 @@ export function SearchForm() {
   }
 
   function applyDatePreset(days: number) {
-    dispatch({
-      type: "SET_FILTERS",
-      payload: { dataInicial: daysAgoISO(days), dataFinal: todayISO(), pagina: 1 },
-    });
+    const overrides = { dataInicial: daysAgoISO(days), dataFinal: todayISO(), pagina: 1 };
+    dispatch({ type: "SET_FILTERS", payload: overrides });
+    executarBusca(overrides);
   }
 
   function applyFilterPreset(presetId: string) {
