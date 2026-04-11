@@ -6,13 +6,13 @@
 const PNCP_BASE = "https://pncp.gov.br/api/consulta";
 
 // ─── Tuning ──────────────────────────────────────────────────────────────────
-const CONCURRENCY = 8;
-const FETCH_TIMEOUT_MS = 5_000;
-const WAVE_DELAY_MS = 200;
-const MAX_ATTEMPTS = 4;
+const CONCURRENCY = 5;
+const FETCH_TIMEOUT_MS = 15_000;
+const WAVE_DELAY_MS = 500;
+const MAX_ATTEMPTS = 5;
 const RETRY_PASSES = 3;
-const RETRY_WAVE_DELAY_MS = 1_000;
-const RETRY_CONCURRENCY = 4;
+const RETRY_WAVE_DELAY_MS = 2_000;
+const RETRY_CONCURRENCY = 3;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));

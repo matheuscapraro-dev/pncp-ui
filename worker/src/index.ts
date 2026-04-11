@@ -200,6 +200,8 @@ async function processSubscription(sub: Subscription): Promise<Partial<Subscript
     let totalApiResults = 0;
     let totalFailedPages = 0;
 
+    let failedChunks = 0;
+
     for (let ci = 0; ci < chunks.length; ci++) {
       const [chunkStart, chunkEnd] = chunks[ci];
       const chunkLabel = chunks.length > 1 ? `${label} [${ci + 1}/${chunks.length}: ${chunkStart}→${chunkEnd}]` : label;
@@ -213,31 +215,40 @@ async function processSubscription(sub: Subscription): Promise<Partial<Subscript
       }
       console.log(`${chunkLabel} Iniciando fetch...`);
 
-      const result = await fetchAllPages({
-        endpoint,
-        params,
-        pageSize,
-        label: chunkLabel,
-        onProgress: (loaded, total) => {
-          if (loaded % 5 === 0 || loaded === total || loaded === 1) {
-            console.log(`${chunkLabel} Progresso: ${loaded}/${total} páginas (${elapsed(t0)}) [${memUsage()}]`);
-          }
-        },
-      });
+      try {
+        const result = await fetchAllPages({
+          endpoint,
+          params,
+          pageSize,
+          label: chunkLabel,
+          onProgress: (loaded, total) => {
+            if (loaded % 5 === 0 || loaded === total || loaded === 1) {
+              console.log(`${chunkLabel} Progresso: ${loaded}/${total} páginas (${elapsed(t0)}) [${memUsage()}]`);
+            }
+          },
+        });
 
-      console.log(`${chunkLabel} Chunk concluído em ${elapsed(t0)} — ${result.totalApiResults} registros, ${result.items.length} carregados`);
+        console.log(`${chunkLabel} Chunk concluído em ${elapsed(t0)} — ${result.totalApiResults} registros, ${result.items.length} carregados`);
 
-      allItems.push(...result.items);
-      totalApiResults += result.totalApiResults;
-      totalFailedPages += result.failedPages.length;
+        allItems.push(...result.items);
+        totalApiResults += result.totalApiResults;
+        totalFailedPages += result.failedPages.length;
 
-      if (result.failedPages.length > 0) {
-        console.warn(`${chunkLabel} ${result.failedPages.length} páginas falharam: ${result.failedPages.join(", ")}`);
+        if (result.failedPages.length > 0) {
+          console.warn(`${chunkLabel} ${result.failedPages.length} páginas falharam: ${result.failedPages.join(", ")}`);
+        }
+      } catch (chunkErr) {
+        failedChunks++;
+        const msg = chunkErr instanceof Error ? chunkErr.message : String(chunkErr);
+        console.error(`${chunkLabel} ✗ Chunk falhou: ${msg} — pulando para o próximo`);
       }
     }
 
     console.log(`${label} Fetch total concluído em ${elapsed(t0)} — ${totalApiResults} registros, ${allItems.length} carregados [${memUsage()}]`);
 
+    if (failedChunks > 0) {
+      console.warn(`${label} ${failedChunks}/${chunks.length} chunks falharam completamente`);
+    }
     if (totalFailedPages > 0) {
       console.warn(`${label} Total de páginas falhadas: ${totalFailedPages}`);
     }
