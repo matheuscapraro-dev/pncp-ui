@@ -6,13 +6,13 @@
 const PNCP_BASE = "https://pncp.gov.br/api/consulta";
 
 // ─── Tuning ──────────────────────────────────────────────────────────────────
-const CONCURRENCY = 5;
-const FETCH_TIMEOUT_MS = 30_000;
-const WAVE_DELAY_MS = 500;
+const CONCURRENCY = 8;
+const FETCH_TIMEOUT_MS = 15_000;
+const WAVE_DELAY_MS = 200;
 const MAX_ATTEMPTS = 4;
 const RETRY_PASSES = 3;
-const RETRY_WAVE_DELAY_MS = 2_000;
-const RETRY_CONCURRENCY = 3;
+const RETRY_WAVE_DELAY_MS = 1_000;
+const RETRY_CONCURRENCY = 4;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
@@ -54,7 +54,7 @@ async function fetchPage(url: string, attempt = 0, label?: string): Promise<Page
 
       if (!resp.ok) {
         console.warn(`${tag}  fetch ${resp.status} (${dt}ms) tentativa ${i + 1}/${MAX_ATTEMPTS}: ${text.slice(0, 120)}`);
-        if ((resp.status >= 500 || resp.status === 429) && i < MAX_ATTEMPTS - 1) {
+        if ((resp.status >= 500 || resp.status === 429 || resp.status === 400) && i < MAX_ATTEMPTS - 1) {
           await sleep(800 * (i + 1));
           continue;
         }

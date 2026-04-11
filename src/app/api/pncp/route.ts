@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
 
   const upstream = new URL(`${PNCP_BASE}/${endpoint}`);
   for (const [key, value] of searchParams.entries()) {
-    if (key !== "endpoint") {
+    if (key !== "endpoint" && value !== "") {
       upstream.searchParams.set(key, value);
     }
   }
@@ -37,7 +37,7 @@ export async function GET(request: NextRequest) {
   try {
     const resp = await fetch(upstream.toString(), {
       headers: { Accept: "application/json" },
-      signal: AbortSignal.timeout(30_000),
+      signal: AbortSignal.timeout(15_000),
     });
 
     // 204 No Content — return empty pagination envelope

@@ -3,13 +3,13 @@ import { NextRequest } from "next/server";
 const PNCP_BASE = "https://pncp.gov.br/api/consulta";
 
 // ─── Tuning for 500+ page fetches ───────────────────────────────────────────
-const CONCURRENCY = 6;            // parallel requests per wave
-const FETCH_TIMEOUT_MS = 30_000;  // 30s timeout per individual request
-const WAVE_DELAY_MS = 350;        // pause between concurrency waves
+const CONCURRENCY = 8;            // parallel requests per wave
+const FETCH_TIMEOUT_MS = 15_000;  // 15s timeout per individual request
+const WAVE_DELAY_MS = 200;        // pause between concurrency waves
 const MAX_ATTEMPTS = 4;           // total attempts per page (1 initial + 3 retries)
 const RETRY_PASSES = 3;           // number of full retry sweeps for failures
-const RETRY_WAVE_DELAY_MS = 1_500; // longer pause between retry waves
-const RETRY_CONCURRENCY = 3;      // lower concurrency for retries
+const RETRY_WAVE_DELAY_MS = 1_000; // pause between retry waves
+const RETRY_CONCURRENCY = 4;      // concurrency for retries
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
@@ -43,10 +43,10 @@ export async function GET(request: NextRequest) {
 
   const pageSize = Number(searchParams.get("tamanhoPagina")) || 50;
 
-  // Build upstream URL template (strip our internal params)
+  // Build upstream URL template (strip internal params and empty values)
   const baseParams = new URLSearchParams();
   for (const [key, value] of searchParams.entries()) {
-    if (key !== "endpoint" && key !== "pagina" && key !== "tamanhoPagina") {
+    if (key !== "endpoint" && key !== "pagina" && key !== "tamanhoPagina" && value !== "") {
       baseParams.set(key, value);
     }
   }
@@ -77,7 +77,7 @@ export async function GET(request: NextRequest) {
         if (!text || text.trim() === "") return { data: [], totalRegistros: 0, totalPaginas: 0 };
 
         if (!resp.ok) {
-          if ((resp.status >= 500 || resp.status === 429) && attempt < MAX_ATTEMPTS - 1) {
+          if ((resp.status >= 500 || resp.status === 429 || resp.status === 400) && attempt < MAX_ATTEMPTS - 1) {
             await sleep(800 * (attempt + 1)); // 800ms, 1600ms, 2400ms
             continue;
           }
