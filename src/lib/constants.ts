@@ -57,7 +57,7 @@ export const TIPOS_INSTRUMENTO_CONVOCATORIO = [
 
 export const DEFAULT_PAGE_SIZE = 20;
 export const MIN_PAGE_SIZE = 10;
-export const MAX_PAGE_SIZE_CONTRATACOES = 50;
+export const MAX_PAGE_SIZE_CONTRATACOES = 500;
 export const MAX_PAGE_SIZE_CONTRATOS = 500;
 
 export const PNCP_API_BASE = "https://pncp.gov.br/api/consulta";

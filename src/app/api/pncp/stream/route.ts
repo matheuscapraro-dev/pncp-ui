@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 
 const PNCP_BASE = "https://pncp.gov.br/api/consulta";
 const SERVER_CONCURRENCY = 8;
-const FETCH_TIMEOUT_MS = 20_000; // 20s per PNCP request
+const FETCH_TIMEOUT_MS = 30_000; // 30s per PNCP request
 const MAX_RETRIES = 2;
 const RETRY_DELAY_MS = 500;
 const BATCH_DELAY_MS = 200; // delay between batches to avoid throttling
