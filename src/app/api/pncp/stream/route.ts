@@ -1,26 +1,30 @@
 import { NextRequest } from "next/server";
 
 const PNCP_BASE = "https://pncp.gov.br/api/consulta";
-const SERVER_CONCURRENCY = 8;
-const FETCH_TIMEOUT_MS = 30_000; // 30s per PNCP request
-const MAX_RETRIES = 2;
-const RETRY_DELAY_MS = 500;
-const BATCH_DELAY_MS = 200; // delay between batches to avoid throttling
-const RETRY_CONCURRENCY = 4; // lower concurrency for retry pass
-const RETRY_BATCH_DELAY_MS = 1_000; // longer delay between retry batches
+
+// ─── Tuning for 500+ page fetches ───────────────────────────────────────────
+const CONCURRENCY = 6;            // parallel requests per wave
+const FETCH_TIMEOUT_MS = 30_000;  // 30s timeout per individual request
+const WAVE_DELAY_MS = 350;        // pause between concurrency waves
+const MAX_ATTEMPTS = 4;           // total attempts per page (1 initial + 3 retries)
+const RETRY_PASSES = 3;           // number of full retry sweeps for failures
+const RETRY_WAVE_DELAY_MS = 1_500; // longer pause between retry waves
+const RETRY_CONCURRENCY = 3;      // lower concurrency for retries
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+type PageResult = { data: unknown[]; totalRegistros: number; totalPaginas: number };
+
 /**
  * Streaming PNCP fetcher.
  *
- * Fetches ALL pages server-side in parallel batches and streams results
- * back as NDJSON (newline-delimited JSON). This eliminates hundreds of
- * individual browser→proxy round-trips.
+ * Fetches ALL pages server-side in controlled waves and streams results
+ * back as NDJSON. Failed pages are retried in multiple passes with
+ * exponential back-off so that 500+ page result sets complete reliably.
  *
- * Each line is one of:
+ * Protocol (one JSON object per line):
  *   { type: "meta", totalItems, totalPages }
  *   { type: "batch", items: [...], loadedPages, totalPages }
  *   { type: "done" }
@@ -33,13 +37,13 @@ export async function GET(request: NextRequest) {
   if (!endpoint || !endpoint.startsWith("v1/")) {
     return new Response(
       JSON.stringify({ error: "Endpoint inválido." }),
-      { status: 400, headers: { "Content-Type": "application/json" } }
+      { status: 400, headers: { "Content-Type": "application/json" } },
     );
   }
 
   const pageSize = Number(searchParams.get("tamanhoPagina")) || 50;
 
-  // Build upstream URL template (without pagina/tamanhoPagina)
+  // Build upstream URL template (strip our internal params)
   const baseParams = new URLSearchParams();
   for (const [key, value] of searchParams.entries()) {
     if (key !== "endpoint" && key !== "pagina" && key !== "tamanhoPagina") {
@@ -55,8 +59,9 @@ export async function GET(request: NextRequest) {
     return url.toString();
   }
 
-  async function fetchPage(page: number, signal: AbortSignal): Promise<{ data: unknown[]; totalRegistros: number; totalPaginas: number }> {
-    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+  /** Fetch a single page with built-in per-attempt retry & back-off. */
+  async function fetchPage(page: number, signal: AbortSignal): Promise<PageResult> {
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
       try {
         const timeout = AbortSignal.timeout(FETCH_TIMEOUT_MS);
         const combined = AbortSignal.any([signal, timeout]);
@@ -65,37 +70,80 @@ export async function GET(request: NextRequest) {
           headers: { Accept: "application/json" },
           signal: combined,
         });
+
         if (resp.status === 204) return { data: [], totalRegistros: 0, totalPaginas: 0 };
+
         const text = await resp.text();
         if (!text || text.trim() === "") return { data: [], totalRegistros: 0, totalPaginas: 0 };
+
         if (!resp.ok) {
-          // Retry on server errors (5xx) and rate limits (429)
-          if ((resp.status >= 500 || resp.status === 429) && attempt < MAX_RETRIES) {
-            await new Promise((r) => setTimeout(r, RETRY_DELAY_MS * (attempt + 1)));
+          if ((resp.status >= 500 || resp.status === 429) && attempt < MAX_ATTEMPTS - 1) {
+            await sleep(800 * (attempt + 1)); // 800ms, 1600ms, 2400ms
             continue;
           }
           throw new Error(`PNCP ${resp.status}: ${text.slice(0, 200)}`);
         }
+
         return JSON.parse(text);
       } catch (err) {
-        // Don't retry if the main signal was aborted (user cancelled)
         if (signal.aborted) throw err;
-        // Retry on timeout / network errors
-        if (attempt < MAX_RETRIES) {
-          await new Promise((r) => setTimeout(r, RETRY_DELAY_MS * (attempt + 1)));
+        if (attempt < MAX_ATTEMPTS - 1) {
+          await sleep(800 * (attempt + 1));
           continue;
         }
         throw err;
       }
     }
-    // Should not reach here, but satisfy TS
     return { data: [], totalRegistros: 0, totalPaginas: 0 };
+  }
+
+  /**
+   * Fetch an array of pages in controlled waves.
+   * Returns { items, failedPages }.
+   */
+  async function fetchWaves(
+    pages: number[],
+    signal: AbortSignal,
+    concurrency: number,
+    waveDelay: number,
+    onBatch: (items: unknown[], pagesCompleted: number) => void,
+  ): Promise<number[]> {
+    const failed: number[] = [];
+
+    for (let i = 0; i < pages.length; i += concurrency) {
+      if (signal.aborted) break;
+
+      const wave = pages.slice(i, i + concurrency);
+      const results = await Promise.allSettled(
+        wave.map((p) => fetchPage(p, signal)),
+      );
+
+      if (signal.aborted) break;
+
+      const waveItems: unknown[] = [];
+      for (let j = 0; j < results.length; j++) {
+        const r = results[j];
+        if (r.status === "fulfilled" && r.value.data) {
+          waveItems.push(...r.value.data);
+        } else {
+          failed.push(wave[j]);
+        }
+      }
+
+      onBatch(waveItems, wave.length);
+
+      // Delay between waves (skip after last)
+      const isLast = i + concurrency >= pages.length;
+      if (!isLast && !signal.aborted) {
+        await sleep(waveDelay);
+      }
+    }
+
+    return failed;
   }
 
   const encoder = new TextEncoder();
   const abortController = new AbortController();
-
-  // Abort server fetches if client disconnects
   request.signal.addEventListener("abort", () => abortController.abort());
 
   const stream = new ReadableStream({
@@ -105,7 +153,7 @@ export async function GET(request: NextRequest) {
       }
 
       try {
-        // 1. Fetch first page to discover totals
+        // 1. First page — discover totals
         const first = await fetchPage(1, abortController.signal);
         const totalPages = first.totalPaginas || 1;
         const totalItems = first.totalRegistros || first.data.length;
@@ -119,68 +167,40 @@ export async function GET(request: NextRequest) {
           return;
         }
 
-        // 2. Fetch remaining pages in server-side batches with delay
+        // 2. Fetch remaining pages
         const remaining = Array.from({ length: totalPages - 1 }, (_, i) => i + 2);
-        let loadedPages = 1;
-        const failedPages: number[] = [];
+        let completedPages = 1;
 
-        for (let i = 0; i < remaining.length; i += SERVER_CONCURRENCY) {
+        let failedPages = await fetchWaves(
+          remaining,
+          abortController.signal,
+          CONCURRENCY,
+          WAVE_DELAY_MS,
+          (items, count) => {
+            completedPages += count;
+            send({ type: "batch", items, loadedPages: completedPages, totalPages });
+          },
+        );
+
+        // 3. Multiple retry passes with increasing back-off
+        for (let pass = 0; pass < RETRY_PASSES && failedPages.length > 0; pass++) {
           if (abortController.signal.aborted) break;
 
-          const batch = remaining.slice(i, i + SERVER_CONCURRENCY);
-          const results = await Promise.allSettled(
-            batch.map((p) => fetchPage(p, abortController.signal))
-          );
-
+          // Exponential cooldown: 2s, 4s, 8s before each pass
+          await sleep(RETRY_WAVE_DELAY_MS * Math.pow(2, pass));
           if (abortController.signal.aborted) break;
 
-          const batchItems: unknown[] = [];
-          for (let j = 0; j < results.length; j++) {
-            const r = results[j];
-            if (r.status === "fulfilled" && r.value.data) {
-              batchItems.push(...r.value.data);
-            } else if (r.status === "rejected") {
-              failedPages.push(batch[j]);
-            }
-          }
-
-          loadedPages += batch.length;
-          send({ type: "batch", items: batchItems, loadedPages, totalPages });
-
-          // Delay between batches to avoid PNCP throttling
-          const isLastBatch = i + SERVER_CONCURRENCY >= remaining.length;
-          if (!isLastBatch && !abortController.signal.aborted) {
-            await sleep(BATCH_DELAY_MS);
-          }
-        }
-
-        // 3. Retry failed pages with lower concurrency and longer delays
-        if (failedPages.length > 0 && !abortController.signal.aborted) {
-          for (let i = 0; i < failedPages.length; i += RETRY_CONCURRENCY) {
-            if (abortController.signal.aborted) break;
-
-            // Wait before each retry batch
-            await sleep(RETRY_BATCH_DELAY_MS);
-            if (abortController.signal.aborted) break;
-
-            const retryBatch = failedPages.slice(i, i + RETRY_CONCURRENCY);
-            const results = await Promise.allSettled(
-              retryBatch.map((p) => fetchPage(p, abortController.signal))
-            );
-
-            if (abortController.signal.aborted) break;
-
-            const retryItems: unknown[] = [];
-            for (const r of results) {
-              if (r.status === "fulfilled" && r.value.data) {
-                retryItems.push(...r.value.data);
+          failedPages = await fetchWaves(
+            failedPages,
+            abortController.signal,
+            RETRY_CONCURRENCY,
+            RETRY_WAVE_DELAY_MS,
+            (items) => {
+              if (items.length > 0) {
+                send({ type: "batch", items, loadedPages: totalPages, totalPages });
               }
-            }
-
-            if (retryItems.length > 0) {
-              send({ type: "batch", items: retryItems, loadedPages: totalPages, totalPages });
-            }
-          }
+            },
+          );
         }
 
         if (!abortController.signal.aborted) {
