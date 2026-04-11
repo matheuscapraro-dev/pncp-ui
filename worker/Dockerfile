@@ -13,4 +13,4 @@ RUN npm run build
 # Clean dev deps
 RUN npm prune --omit=dev
 
-CMD ["node", "dist/index.js"]
+CMD ["node", "--max-old-space-size=512", "dist/index.js"]

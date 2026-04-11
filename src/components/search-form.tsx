@@ -65,7 +65,8 @@ export function SearchForm() {
   const { state, dispatch, executarBusca, cancelarBusca } = useLicitacoes();
   const { filters, loading } = state;
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showApiAdvanced, setShowApiAdvanced] = useState(false);
+  const [showClientFilters, setShowClientFilters] = useState(true);
   const { presets, savePreset, deletePreset } = useFilterPresets();
   const { create: createSubscription } = useSubscriptions();
   const [activePresetId, setActivePresetId] = useState<string | null>(null);
@@ -75,12 +76,16 @@ export function SearchForm() {
   const isContratacao = isContratacaoMode(filters.searchMode);
   const needsDates = filters.searchMode !== "proposta";
 
-  const activeAdvancedCount = [
+  const activeApiAdvancedCount = [
     filters.codigoModoDisputa != null,
     filters.uf !== "",
     filters.cnpj !== "",
     filters.codigoMunicipioIbge !== "",
     filters.codigoUnidadeAdministrativa !== "",
+  ].filter(Boolean).length;
+
+  const activeClientFilterCount = [
+    filters.textoBusca !== "",
     filters.situacaoCompraId !== "",
     filters.srp !== "",
     filters.valorMinimo !== "",
@@ -109,9 +114,10 @@ export function SearchForm() {
   }
 
   function applyDatePreset(days: number) {
-    const overrides = { dataInicial: daysAgoISO(days), dataFinal: todayISO(), pagina: 1 };
-    dispatch({ type: "SET_FILTERS", payload: overrides });
-    executarBusca(overrides);
+    dispatch({
+      type: "SET_FILTERS",
+      payload: { dataInicial: daysAgoISO(days), dataFinal: todayISO(), pagina: 1 },
+    });
   }
 
   function applyFilterPreset(presetId: string) {
@@ -119,7 +125,7 @@ export function SearchForm() {
     if (!preset) return;
     dispatch({ type: "SET_FILTERS", payload: { ...preset.filters, pagina: 1 } });
     setActivePresetId(presetId);
-    setShowAdvanced(true);
+    setShowApiAdvanced(true);
     toast.success(`Preset "${preset.nome}" aplicado`);
   }
 
@@ -229,8 +235,11 @@ export function SearchForm() {
         </div>
       )}
 
-      {/* Primary filters */}
-      <div className="rounded-lg border bg-card p-3 shadow-sm">
+      {/* ═══ API Filters (server-side — sent to the PNCP API) ═══ */}
+      <div className="rounded-lg border bg-card p-3 shadow-sm space-y-3">
+        <p className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+          <Filter className="h-3 w-3" /> Parâmetros da API
+        </p>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {/* Date range */}
           {needsDates && (
@@ -268,18 +277,11 @@ export function SearchForm() {
               {errors.codigoModalidadeContratacao && <p className="text-xs text-destructive">{errors.codigoModalidadeContratacao}</p>}
             </div>
           )}
-
-          {/* Text search */}
-          <div className="space-y-1">
-            <Label htmlFor="textoBusca" className="text-xs">Busca no Objeto</Label>
-            <Input id="textoBusca" placeholder="Filtrar por palavras..." value={filters.textoBusca}
-              onChange={(e) => updateFilter("textoBusca", e.target.value)} className="h-8 text-sm" />
-          </div>
         </div>
 
         {/* Date presets */}
         {needsDates && (
-          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-1.5">
             <CalendarDays className="h-3 w-3 text-muted-foreground" />
             {DATE_PRESETS.map((p) => (
               <Button key={p.days} type="button" variant="outline" size="sm" className="h-5 px-1.5 text-[10px]"
@@ -287,27 +289,21 @@ export function SearchForm() {
             ))}
           </div>
         )}
-      </div>
 
-      {/* Advanced toggle */}
-      <Button type="button" variant="ghost" size="sm" className="gap-1.5 text-muted-foreground hover:text-foreground"
-        onClick={() => setShowAdvanced(!showAdvanced)}>
-        <SlidersHorizontal className="h-3.5 w-3.5" />
-        <span className="text-xs">Filtros avançados</span>
-        {activeAdvancedCount > 0 && (
-          <Badge variant="secondary" className="h-4 px-1 text-[10px]">{activeAdvancedCount}</Badge>
-        )}
-        {showAdvanced ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-      </Button>
+        {/* API Advanced toggle */}
+        <Button type="button" variant="ghost" size="sm" className="gap-1.5 text-muted-foreground hover:text-foreground h-6 px-1"
+          onClick={() => setShowApiAdvanced(!showApiAdvanced)}>
+          <SlidersHorizontal className="h-3 w-3" />
+          <span className="text-[10px]">Filtros avançados da API</span>
+          {activeApiAdvancedCount > 0 && (
+            <Badge variant="secondary" className="h-4 px-1 text-[10px]">{activeApiAdvancedCount}</Badge>
+          )}
+          {showApiAdvanced ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+        </Button>
 
-      {/* Advanced filters */}
-      {showAdvanced && (
-        <div className="rounded-lg border bg-muted/30 p-3 shadow-sm space-y-3">
-          {/* Server-side filters section */}
-          <div>
-            <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
-              <Filter className="h-3 w-3" /> Filtros de API (server-side)
-            </p>
+        {/* API Advanced filters */}
+        {showApiAdvanced && (
+          <div className="rounded-md border bg-muted/30 p-3">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
               {/* Modo Disputa (contratações only) */}
               {isContratacao && (
@@ -356,174 +352,10 @@ export function SearchForm() {
               </div>
             </div>
           </div>
+        )}
+      </div>
 
-          {/* Client-side filters section */}
-          <div>
-            <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
-              <SlidersHorizontal className="h-3 w-3" /> Filtros locais (client-side — aplicados nos resultados da página)
-            </p>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              {/* Situação (contratações) */}
-              {isContratacao && (
-                <div className="space-y-1">
-                  <Label className="text-xs">Situação da Compra</Label>
-                  <Select value={filters.situacaoCompraId}
-                    onValueChange={(v) => updateFilter("situacaoCompraId", v === "all" ? "" : v)}>
-                    <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Todas" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Todas</SelectItem>
-                      {Object.entries(SITUACAO_COMPRA).map(([id, nome]) => (
-                        <SelectItem key={id} value={id}>{nome}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-              {/* SRP (contratações) */}
-              {isContratacao && (
-                <div className="space-y-1">
-                  <Label className="text-xs">Registro de Preços (SRP)</Label>
-                  <Select value={filters.srp} onValueChange={(v) => updateFilter("srp", v === "all" ? "" : v)}>
-                    <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Todos" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Todos</SelectItem>
-                      <SelectItem value="true">Somente SRP</SelectItem>
-                      <SelectItem value="false">Sem SRP</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-              {/* Esfera */}
-              {isContratacao && (
-                <div className="space-y-1">
-                  <Label className="text-xs">Esfera</Label>
-                  <Select value={filters.esferaId} onValueChange={(v) => updateFilter("esferaId", v === "all" ? "" : v)}>
-                    <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Todas" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Todas</SelectItem>
-                      {ESFERAS.map((e) => <SelectItem key={e.id} value={e.id}>{e.nome}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-              {/* Poder */}
-              {isContratacao && (
-                <div className="space-y-1">
-                  <Label className="text-xs">Poder</Label>
-                  <Select value={filters.poderId} onValueChange={(v) => updateFilter("poderId", v === "all" ? "" : v)}>
-                    <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Todos" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Todos</SelectItem>
-                      {PODERES.map((p) => <SelectItem key={p.id} value={p.id}>{p.nome}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-              {/* Tipo Instrumento Convocatório (contratações) */}
-              {isContratacao && (
-                <div className="space-y-1">
-                  <Label className="text-xs">Instrumento Convocatório</Label>
-                  <Select value={filters.tipoInstrumentoConvocatorio}
-                    onValueChange={(v) => updateFilter("tipoInstrumentoConvocatorio", v === "all" ? "" : v)}>
-                    <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Todos" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Todos</SelectItem>
-                      {TIPOS_INSTRUMENTO_CONVOCATORIO.map((t) => (
-                        <SelectItem key={t.codigo} value={String(t.codigo)}>{t.nome}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-              {/* Has link externo (contratações) */}
-              {isContratacao && (
-                <div className="space-y-1">
-                  <Label className="text-xs">Link Externo</Label>
-                  <Select value={filters.hasLinkExterno} onValueChange={(v) => updateFilter("hasLinkExterno", v === "all" ? "" : v)}>
-                    <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Todos" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Todos</SelectItem>
-                      <SelectItem value="true">Com link</SelectItem>
-                      <SelectItem value="false">Sem link</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-              {/* Nome do Órgão */}
-              <div className="space-y-1">
-                <Label className="text-xs">Nome do Órgão</Label>
-                <Input placeholder="Buscar por nome..." value={filters.nomeOrgao}
-                  onChange={(e) => updateFilter("nomeOrgao", e.target.value)} className="h-8 text-sm" />
-              </div>
-              {/* Município (contratações) */}
-              {isContratacao && (
-                <div className="space-y-1">
-                  <Label className="text-xs">Município (nome)</Label>
-                  <Input placeholder="Ex: São Paulo" value={filters.municipioNome}
-                    onChange={(e) => updateFilter("municipioNome", e.target.value)} className="h-8 text-sm" />
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Value range section */}
-          <div>
-            <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
-              <SlidersHorizontal className="h-3 w-3" /> Filtros de valor (client-side)
-            </p>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              <div className="space-y-1">
-                <Label className="text-xs">Valor Mín. Estimado (R$)</Label>
-                <Input type="number" min="0" step="1000" placeholder="0" value={filters.valorMinimo}
-                  onChange={(e) => updateFilter("valorMinimo", e.target.value)} className="h-8 text-sm" />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Valor Máx. Estimado (R$)</Label>
-                <Input type="number" min="0" step="1000" placeholder="Sem limite" value={filters.valorMaximo}
-                  onChange={(e) => updateFilter("valorMaximo", e.target.value)} className="h-8 text-sm" />
-              </div>
-              {isContratacao && (
-                <>
-                  <div className="space-y-1">
-                    <Label className="text-xs">Homologado Mín. (R$)</Label>
-                    <Input type="number" min="0" step="1000" placeholder="0" value={filters.valorHomologadoMinimo}
-                      onChange={(e) => updateFilter("valorHomologadoMinimo", e.target.value)} className="h-8 text-sm" />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs">Homologado Máx. (R$)</Label>
-                    <Input type="number" min="0" step="1000" placeholder="Sem limite" value={filters.valorHomologadoMaximo}
-                      onChange={(e) => updateFilter("valorHomologadoMaximo", e.target.value)} className="h-8 text-sm" />
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-
-          {/* Keywords section */}
-          <div>
-            <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
-              <SlidersHorizontal className="h-3 w-3" /> Palavras-chave (client-side, filtra no campo Objeto)
-            </p>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div className="space-y-1">
-                <Label className="text-xs">Incluir (mantém se a expressão for verdadeira)</Label>
-                <Input placeholder={`engenharia, "serviço de limpeza" AND predial`} value={filters.palavrasIncluir}
-                  onChange={(e) => updateFilter("palavrasIncluir", e.target.value)} className="h-8 text-sm" />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Excluir (remove se a expressão for verdadeira)</Label>
-                <Input placeholder={`manutenção OR "locação de veículos"`} value={filters.palavrasExcluir}
-                  onChange={(e) => updateFilter("palavrasExcluir", e.target.value)} className="h-8 text-sm" />
-              </div>
-            </div>
-            <p className="mt-1.5 text-[10px] text-muted-foreground">
-              Use vírgula ou OR, AND, NOT, parênteses e &quot;aspas&quot; para frase exata. Ex: (engenharia OR construção) AND NOT manutenção
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* Action buttons */}
+      {/* ═══ Action buttons ═══ */}
       <div className="flex flex-wrap items-center gap-2">
         <Button type="submit" disabled={loading} size="sm" className="gap-1.5">
           {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
@@ -557,6 +389,186 @@ export function SearchForm() {
           )}
         </div>
       </div>
+
+      {/* ═══ Client-side Filters (instant — applied on fetched results) ═══ */}
+      {state.allResults.length > 0 && (
+        <>
+          <Button type="button" variant="ghost" size="sm" className="gap-1.5 text-muted-foreground hover:text-foreground"
+            onClick={() => setShowClientFilters(!showClientFilters)}>
+            <SlidersHorizontal className="h-3.5 w-3.5" />
+            <span className="text-xs">Filtros de resultado</span>
+            {activeClientFilterCount > 0 && (
+              <Badge variant="secondary" className="h-4 px-1 text-[10px]">{activeClientFilterCount}</Badge>
+            )}
+            {showClientFilters ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+          </Button>
+
+          {showClientFilters && (
+            <div className="rounded-lg border bg-muted/30 p-3 shadow-sm space-y-3">
+              {/* Text search + keywords */}
+              <div>
+                <p className="mb-2 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  <Search className="h-3 w-3" /> Busca textual
+                </p>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                  <div className="space-y-1">
+                    <Label htmlFor="textoBusca" className="text-xs">Busca no Objeto</Label>
+                    <Input id="textoBusca" placeholder="Filtrar por palavras..." value={filters.textoBusca}
+                      onChange={(e) => updateFilter("textoBusca", e.target.value)} className="h-8 text-sm" />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Palavras-chave (incluir)</Label>
+                    <Input placeholder={`engenharia, "serviço de limpeza" AND predial`} value={filters.palavrasIncluir}
+                      onChange={(e) => updateFilter("palavrasIncluir", e.target.value)} className="h-8 text-sm" />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Palavras-chave (excluir)</Label>
+                    <Input placeholder={`manutenção OR "locação de veículos"`} value={filters.palavrasExcluir}
+                      onChange={(e) => updateFilter("palavrasExcluir", e.target.value)} className="h-8 text-sm" />
+                  </div>
+                </div>
+                <p className="mt-1.5 text-[10px] text-muted-foreground">
+                  Palavras-chave suportam vírgula ou OR, AND, NOT, parênteses e &quot;aspas&quot; para frase exata.
+                </p>
+              </div>
+
+              {/* Selects */}
+              {isContratacao && (
+                <div>
+                  <p className="mb-2 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    <Filter className="h-3 w-3" /> Classificação
+                  </p>
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+                    {/* Situação */}
+                    <div className="space-y-1">
+                      <Label className="text-xs">Situação</Label>
+                      <Select value={filters.situacaoCompraId}
+                        onValueChange={(v) => updateFilter("situacaoCompraId", v === "all" ? "" : v)}>
+                        <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Todas" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">Todas</SelectItem>
+                          {Object.entries(SITUACAO_COMPRA).map(([id, nome]) => (
+                            <SelectItem key={id} value={id}>{nome}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {/* SRP */}
+                    <div className="space-y-1">
+                      <Label className="text-xs">SRP</Label>
+                      <Select value={filters.srp} onValueChange={(v) => updateFilter("srp", v === "all" ? "" : v)}>
+                        <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Todos" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">Todos</SelectItem>
+                          <SelectItem value="true">Somente SRP</SelectItem>
+                          <SelectItem value="false">Sem SRP</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {/* Esfera */}
+                    <div className="space-y-1">
+                      <Label className="text-xs">Esfera</Label>
+                      <Select value={filters.esferaId} onValueChange={(v) => updateFilter("esferaId", v === "all" ? "" : v)}>
+                        <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Todas" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">Todas</SelectItem>
+                          {ESFERAS.map((e) => <SelectItem key={e.id} value={e.id}>{e.nome}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {/* Poder */}
+                    <div className="space-y-1">
+                      <Label className="text-xs">Poder</Label>
+                      <Select value={filters.poderId} onValueChange={(v) => updateFilter("poderId", v === "all" ? "" : v)}>
+                        <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Todos" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">Todos</SelectItem>
+                          {PODERES.map((p) => <SelectItem key={p.id} value={p.id}>{p.nome}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {/* Instrumento Convocatório */}
+                    <div className="space-y-1">
+                      <Label className="text-xs">Instrumento</Label>
+                      <Select value={filters.tipoInstrumentoConvocatorio}
+                        onValueChange={(v) => updateFilter("tipoInstrumentoConvocatorio", v === "all" ? "" : v)}>
+                        <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Todos" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">Todos</SelectItem>
+                          {TIPOS_INSTRUMENTO_CONVOCATORIO.map((t) => (
+                            <SelectItem key={t.codigo} value={String(t.codigo)}>{t.nome}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {/* Link Externo */}
+                    <div className="space-y-1">
+                      <Label className="text-xs">Link Externo</Label>
+                      <Select value={filters.hasLinkExterno} onValueChange={(v) => updateFilter("hasLinkExterno", v === "all" ? "" : v)}>
+                        <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Todos" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">Todos</SelectItem>
+                          <SelectItem value="true">Com link</SelectItem>
+                          <SelectItem value="false">Sem link</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Órgão / Município */}
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="space-y-1">
+                  <Label className="text-xs">Nome do Órgão</Label>
+                  <Input placeholder="Buscar por nome..." value={filters.nomeOrgao}
+                    onChange={(e) => updateFilter("nomeOrgao", e.target.value)} className="h-8 text-sm" />
+                </div>
+                {isContratacao && (
+                  <div className="space-y-1">
+                    <Label className="text-xs">Município (nome)</Label>
+                    <Input placeholder="Ex: São Paulo" value={filters.municipioNome}
+                      onChange={(e) => updateFilter("municipioNome", e.target.value)} className="h-8 text-sm" />
+                  </div>
+                )}
+              </div>
+
+              {/* Value ranges */}
+              <div>
+                <p className="mb-2 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  <SlidersHorizontal className="h-3 w-3" /> Faixa de valor
+                </p>
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  <div className="space-y-1">
+                    <Label className="text-xs">Valor Mín. Estimado (R$)</Label>
+                    <Input type="number" min="0" step="1000" placeholder="0" value={filters.valorMinimo}
+                      onChange={(e) => updateFilter("valorMinimo", e.target.value)} className="h-8 text-sm" />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Valor Máx. Estimado (R$)</Label>
+                    <Input type="number" min="0" step="1000" placeholder="Sem limite" value={filters.valorMaximo}
+                      onChange={(e) => updateFilter("valorMaximo", e.target.value)} className="h-8 text-sm" />
+                  </div>
+                  {isContratacao && (
+                    <>
+                      <div className="space-y-1">
+                        <Label className="text-xs">Homologado Mín. (R$)</Label>
+                        <Input type="number" min="0" step="1000" placeholder="0" value={filters.valorHomologadoMinimo}
+                          onChange={(e) => updateFilter("valorHomologadoMinimo", e.target.value)} className="h-8 text-sm" />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs">Homologado Máx. (R$)</Label>
+                        <Input type="number" min="0" step="1000" placeholder="Sem limite" value={filters.valorHomologadoMaximo}
+                          onChange={(e) => updateFilter("valorHomologadoMaximo", e.target.value)} className="h-8 text-sm" />
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </>
+      )}
     </form>
   );
 }

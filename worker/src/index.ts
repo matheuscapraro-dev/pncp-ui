@@ -247,6 +247,7 @@ async function processSubscription(sub: Subscription): Promise<Partial<Subscript
     console.log(`${label} Após filtros: ${filtered.length} itens`);
 
     // Save raw results to Blob (for interactive filtering in UI)
+    // Uses streaming serialization to avoid OOM on large arrays.
     console.log(`${label} Salvando dados brutos no Blob (${allItems.length} itens)...`);
     const rawEnvelope: SubscriptionRawEnvelope = {
       subscriptionId: sub.id,
@@ -254,11 +255,13 @@ async function processSubscription(sub: Subscription): Promise<Partial<Subscript
       totalApiResults,
       items: allItems,
     };
-    await saveRawResults(rawEnvelope);
-    console.log(`${label} Dados brutos salvos`);
-
-    // Free memory from raw results
+    // Drop our reference early — rawEnvelope.items still holds the array
+    // so the streaming serializer can consume it.
     allItems = [];
+    await saveRawResults(rawEnvelope);
+    // Now let the raw envelope (and its items) be GC'd
+    rawEnvelope.items = [];
+    console.log(`${label} Dados brutos salvos [${memUsage()}]`);
 
     // Save filtered results to Blob
     console.log(`${label} Salvando resultados filtrados no Blob...`);

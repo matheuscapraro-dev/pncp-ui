@@ -39,6 +39,44 @@ async function writeBlob(pathname: string, data: unknown): Promise<void> {
   });
 }
 
+/**
+ * Stream a JSON envelope with a large `items` array to Vercel Blob without
+ * ever materializing the entire JSON string in memory.  Each item is
+ * stringified individually (~1-2 KB), keeping peak allocation minimal.
+ */
+function streamEnvelopeToBlob(
+  pathname: string,
+  headerFields: Record<string, string | number>,
+  items: unknown[],
+): Promise<void> {
+  const encoder = new TextEncoder();
+
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      // Build the opening JSON: {"field1":"val",...,"items":[
+      const parts = Object.entries(headerFields).map(
+        ([k, v]) => `${JSON.stringify(k)}:${JSON.stringify(v)}`,
+      );
+      controller.enqueue(encoder.encode(`{${parts.join(",")},"items":[`));
+
+      for (let i = 0; i < items.length; i++) {
+        const prefix = i > 0 ? "," : "";
+        controller.enqueue(encoder.encode(prefix + JSON.stringify(items[i])));
+      }
+
+      controller.enqueue(encoder.encode("]}"));
+      controller.close();
+    },
+  });
+
+  return put(pathname, stream, {
+    access: "private",
+    addRandomSuffix: false,
+    allowOverwrite: true,
+    contentType: "application/json",
+  }).then(() => undefined);
+}
+
 export async function loadSubscriptions(): Promise<Subscription[]> {
   const index = await readBlob<SubscriptionIndex>(INDEX_PATH);
   return index?.subscriptions ?? [];
@@ -54,13 +92,30 @@ export async function saveSubscriptions(subs: Subscription[]): Promise<void> {
 export async function saveResults(
   envelope: SubscriptionResultsEnvelope,
 ): Promise<void> {
-  await writeBlob(resultsPath(envelope.subscriptionId), envelope);
+  await streamEnvelopeToBlob(
+    resultsPath(envelope.subscriptionId),
+    {
+      subscriptionId: envelope.subscriptionId,
+      refreshedAt: envelope.refreshedAt,
+      totalApiResults: envelope.totalApiResults,
+      filteredCount: envelope.filteredCount,
+    },
+    envelope.items,
+  );
 }
 
 export async function saveRawResults(
   envelope: SubscriptionRawEnvelope,
 ): Promise<void> {
-  await writeBlob(rawPath(envelope.subscriptionId), envelope);
+  await streamEnvelopeToBlob(
+    rawPath(envelope.subscriptionId),
+    {
+      subscriptionId: envelope.subscriptionId,
+      refreshedAt: envelope.refreshedAt,
+      totalApiResults: envelope.totalApiResults,
+    },
+    envelope.items,
+  );
 }
 
 export async function deleteResults(id: string): Promise<void> {
