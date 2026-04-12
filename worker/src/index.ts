@@ -11,7 +11,7 @@
  *   6. Updates subscription metadata
  */
 
-import { loadSubscriptions, saveSubscriptions, saveResults, saveRawResults } from "./blob.js";
+import { loadSubscriptions, saveSubscriptions, saveResults, saveRawResults, acquireLock, releaseLock } from "./blob.js";
 import { fetchAllPages } from "./fetch-pncp.js";
 import { applyFilters } from "./apply-filters.js";
 import type { Subscription, SubscriptionFilters, SubscriptionResultsEnvelope, SubscriptionRawEnvelope } from "./types.js";
@@ -311,12 +311,24 @@ async function processSubscription(sub: Subscription): Promise<Partial<Subscript
 
 async function main() {
   const mainT0 = Date.now();
+  const targetSubscriptionId = process.env.SUBSCRIPTION_ID?.trim() || undefined;
 
   console.log("═══════════════════════════════════════════════════════════");
   console.log("  PNCP Subscription Worker");
   console.log(`  ${new Date().toISOString()}`);
   console.log(`  Node ${process.version} | PID ${process.pid} | ${memUsage()}`);
+  if (targetSubscriptionId) {
+    console.log(`  Modo: inscrição individual (${targetSubscriptionId})`);
+  }
   console.log("═══════════════════════════════════════════════════════════\n");
+
+  // ─── Acquire lock ────────────────────────────────────────────────────────
+  const locked = await acquireLock(targetSubscriptionId);
+  if (!locked) {
+    console.log("⏳ Outro worker está ativo (lock recente). Saindo sem processar.");
+    return;
+  }
+  console.log("🔒 Lock adquirido.\n");
 
   // Heartbeat timer — logs every 60s so we can see the process is alive
   const heartbeat = setInterval(() => {
@@ -325,18 +337,34 @@ async function main() {
 
   try {
     const subscriptions = await loadSubscriptions();
-    const enabled = subscriptions.filter((s) => s.enabled);
+
+    // Determine which subscriptions to process
+    let toProcess: Subscription[];
+    if (targetSubscriptionId) {
+      const target = subscriptions.find((s) => s.id === targetSubscriptionId);
+      if (!target) {
+        console.log(`Inscrição ${targetSubscriptionId} não encontrada. Finalizando.`);
+        return;
+      }
+      if (!target.enabled) {
+        console.log(`Inscrição "${target.nome}" está desativada. Finalizando.`);
+        return;
+      }
+      toProcess = [target];
+    } else {
+      toProcess = subscriptions.filter((s) => s.enabled);
+    }
 
     console.log(`Total de inscrições: ${subscriptions.length}`);
-    console.log(`Ativas: ${enabled.length}\n`);
+    console.log(`A processar: ${toProcess.length}\n`);
 
-    if (enabled.length === 0) {
-      console.log("Nenhuma inscrição ativa. Finalizando.");
+    if (toProcess.length === 0) {
+      console.log("Nenhuma inscrição para processar. Finalizando.");
       return;
     }
 
     // Process subscriptions sequentially to avoid overwhelming the PNCP API
-    for (const sub of enabled) {
+    for (const sub of toProcess) {
       const updates = await processSubscription(sub);
 
       // Update the subscription metadata
@@ -356,6 +384,8 @@ async function main() {
     console.log("═══════════════════════════════════════════════════════════");
   } finally {
     clearInterval(heartbeat);
+    await releaseLock();
+    console.log("🔓 Lock liberado.");
   }
 }
 

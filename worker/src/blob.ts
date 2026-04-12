@@ -14,6 +14,10 @@ import type {
 const INDEX_PATH = "subscriptions/index.json";
 const RESULTS_PREFIX = "subscriptions/results/";
 const RAW_PREFIX = "subscriptions/raw/";
+const LOCK_PATH = "subscriptions/worker-lock.json";
+
+/** Lock is considered stale after 30 minutes (crashed worker). */
+const LOCK_TTL_MS = 30 * 60 * 1000;
 
 function resultsPath(id: string): string {
   return `${RESULTS_PREFIX}${id}.json`;
@@ -126,4 +130,49 @@ export async function deleteResults(id: string): Promise<void> {
   const { blobs: rawBlobs } = await list({ prefix: rawPath(id), limit: 1 });
   const rawBlob = rawBlobs.find((b) => b.pathname === rawPath(id));
   if (rawBlob) await del(rawBlob.url);
+}
+
+// ─── Worker lock ─────────────────────────────────────────────────────────────
+
+export interface WorkerLock {
+  startedAt: string;
+  pid: number;
+  subscriptionId?: string;
+}
+
+/**
+ * Try to acquire the worker lock.
+ * Returns `true` if the lock was acquired, `false` if another run is active.
+ * Automatically breaks stale locks (older than LOCK_TTL_MS).
+ */
+export async function acquireLock(subscriptionId?: string): Promise<boolean> {
+  const existing = await readBlob<WorkerLock>(LOCK_PATH);
+
+  if (existing) {
+    const age = Date.now() - new Date(existing.startedAt).getTime();
+    if (age < LOCK_TTL_MS) {
+      return false; // another run is active
+    }
+    // Stale lock — proceed and overwrite
+    console.log(`⚠ Lock stale (${(age / 60_000).toFixed(0)}min), quebrando.`);
+  }
+
+  const lock: WorkerLock = {
+    startedAt: new Date().toISOString(),
+    pid: process.pid,
+    ...(subscriptionId && { subscriptionId }),
+  };
+
+  await writeBlob(LOCK_PATH, lock);
+  return true;
+}
+
+export async function releaseLock(): Promise<void> {
+  try {
+    const { blobs } = await list({ prefix: LOCK_PATH, limit: 1 });
+    const blob = blobs.find((b) => b.pathname === LOCK_PATH);
+    if (blob) await del(blob.url);
+  } catch {
+    // Best-effort — stale lock will be broken by TTL
+  }
 }

@@ -70,5 +70,16 @@ export function useSubscriptions() {
     );
   }, []);
 
-  return { subscriptions, loading, refresh, create, remove, toggle };
+  const trigger = useCallback(async (id: string) => {
+    const resp = await fetch(`/api/subscriptions/${id}/trigger`, {
+      method: "POST",
+    });
+    if (!resp.ok) {
+      const err = await resp.json();
+      throw new Error(err.error || "Erro ao disparar worker");
+    }
+    return resp.json();
+  }, []);
+
+  return { subscriptions, loading, refresh, create, remove, toggle, trigger };
 }

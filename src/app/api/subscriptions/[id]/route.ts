@@ -6,6 +6,7 @@ import {
   getSubscriptionResults,
   getSubscriptionRawResults,
 } from "@/lib/blob-storage";
+import { triggerWorker } from "@/lib/trigger-worker";
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -51,10 +52,18 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
 
   try {
     const body = await request.json();
+    const previous = await getSubscription(id);
     const updated = await updateSubscription(id, body);
 
     if (!updated) {
       return NextResponse.json({ error: "Inscrição não encontrada." }, { status: 404 });
+    }
+
+    // Trigger worker when filters change or subscription is re-enabled
+    const filtersChanged = body.filters !== undefined;
+    const wasEnabled = body.enabled === true && previous && !previous.enabled;
+    if (filtersChanged || wasEnabled) {
+      triggerWorker(id);
     }
 
     return NextResponse.json(updated);

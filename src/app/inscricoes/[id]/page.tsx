@@ -40,6 +40,7 @@ import {
   FileText,
   Filter,
   Loader2,
+  Play,
   RotateCcw,
   SlidersHorizontal,
   Trash2,
@@ -526,8 +527,16 @@ export default function SubscriptionResultsPage() {
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [deleting, setDeleting] = useState(false);
+  const [triggering, setTriggering] = useState(false);
   const [localFilters, setLocalFilters] = useState<LocalFilters>(EMPTY_FILTERS);
   const [filtersExpanded, setFiltersExpanded] = useState(false);
+  const [now, setNow] = useState(Date.now());
+
+  // Tick every 30s so the cooldown timer and "time ago" labels stay fresh
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     async function load() {
@@ -569,6 +578,45 @@ export default function SubscriptionResultsPage() {
       setDeleting(false);
     }
   }
+
+  async function handleTrigger() {
+    setTriggering(true);
+    try {
+      const resp = await fetch(`/api/subscriptions/${params.id}/trigger`, { method: "POST" });
+      if (resp.ok) {
+        toast.success("Worker disparado!", {
+          description: "Os resultados serão atualizados em alguns minutos.",
+        });
+        // Optimistically update local state so UI reflects trigger
+        setData((prev) =>
+          prev
+            ? {
+                ...prev,
+                subscription: {
+                  ...prev.subscription,
+                  lastRefreshedAt: new Date().toISOString(),
+                },
+              }
+            : prev,
+        );
+        setNow(Date.now());
+      } else {
+        const body = await resp.json();
+        toast.error(body.error || "Erro ao disparar worker.");
+      }
+    } catch {
+      toast.error("Erro de conexão.");
+    } finally {
+      setTriggering(false);
+    }
+  }
+
+  const COOLDOWN_MS = 10 * 60 * 1000;
+  const lastRefresh = data?.subscription.lastRefreshedAt
+    ? new Date(data.subscription.lastRefreshedAt).getTime()
+    : 0;
+  const cooldownRemaining = lastRefresh ? Math.max(0, COOLDOWN_MS - (now - lastRefresh)) : 0;
+  const canTrigger = cooldownRemaining === 0;
 
   const sub = data?.subscription;
   const mode = sub?.filters.searchMode ?? "publicacao";
@@ -659,16 +707,45 @@ export default function SubscriptionResultsPage() {
             )}
           </div>
         </div>
-        <Button
-          variant="destructive"
-          size="sm"
-          onClick={handleDelete}
-          disabled={deleting}
-          className="gap-1.5"
-        >
-          {deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-          Excluir
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleTrigger}
+                disabled={triggering || !canTrigger || !sub!.enabled}
+                className="gap-1.5"
+              >
+                {triggering ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
+                <span className="hidden sm:inline">Rodar Agora</span>
+                <span className="sm:hidden">Rodar</span>
+                {!canTrigger && cooldownRemaining > 0 && (
+                  <span className="text-[10px] tabular-nums text-muted-foreground">
+                    {Math.ceil(cooldownRemaining / 60_000)}min
+                  </span>
+                )}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              {!sub!.enabled
+                ? "Inscrição desativada"
+                : !canTrigger
+                  ? `Aguarde ${Math.ceil(cooldownRemaining / 60_000)} min`
+                  : "Executar busca imediatamente"}
+            </TooltipContent>
+          </Tooltip>
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={handleDelete}
+            disabled={deleting}
+            className="gap-1.5"
+          >
+            {deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+            <span className="hidden sm:inline">Excluir</span>
+          </Button>
+        </div>
       </div>
 
       {/* KPIs */}
@@ -737,7 +814,7 @@ export default function SubscriptionResultsPage() {
             <Loader2 className="h-8 w-8 animate-spin text-muted-foreground mb-3" />
             <p className="font-medium">Aguardando primeira atualização</p>
             <p className="text-sm text-muted-foreground mt-1">
-              O worker roda diariamente às 06:00 (BRT). Os resultados aparecerão aqui automaticamente.
+              Clique em <strong>Rodar Agora</strong> acima ou aguarde a execução automática diária às 06:00 (BRT).
             </p>
           </CardContent>
         </Card>
