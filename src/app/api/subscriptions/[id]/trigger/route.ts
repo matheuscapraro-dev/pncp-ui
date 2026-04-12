@@ -37,7 +37,15 @@ export async function POST(_request: NextRequest, { params }: RouteParams) {
       }
     }
 
-    triggerWorker(id);
+    const result = await triggerWorker(id);
+
+    if (!result.ok) {
+      console.error(`[trigger] Failed for ${id}: ${result.error}`);
+      return NextResponse.json(
+        { error: result.error ?? "Falha ao disparar worker no Render." },
+        { status: 502 },
+      );
+    }
 
     return NextResponse.json({ ok: true, message: "Worker disparado." }, { status: 202 });
   } catch (err) {

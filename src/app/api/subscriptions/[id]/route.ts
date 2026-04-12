@@ -63,7 +63,9 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     const filtersChanged = body.filters !== undefined;
     const wasEnabled = body.enabled === true && previous && !previous.enabled;
     if (filtersChanged || wasEnabled) {
-      triggerWorker(id);
+      triggerWorker(id).then((r) => {
+        if (!r.ok) console.error(`[subscriptions/PATCH] trigger failed for ${id}: ${r.error}`);
+      });
     }
 
     return NextResponse.json(updated);

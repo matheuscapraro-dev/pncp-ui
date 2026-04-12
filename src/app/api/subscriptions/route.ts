@@ -52,7 +52,9 @@ export async function POST(request: NextRequest) {
     await createSubscription(sub);
 
     // Fire-and-forget: trigger the worker for this specific subscription
-    triggerWorker(sub.id);
+    triggerWorker(sub.id).then((r) => {
+      if (!r.ok) console.error(`[subscriptions/POST] trigger failed for ${sub.id}: ${r.error}`);
+    });
 
     return NextResponse.json(sub, { status: 201 });
   } catch (err) {

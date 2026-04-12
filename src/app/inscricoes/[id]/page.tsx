@@ -32,7 +32,11 @@ import {
 import {
   ArrowLeft,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   ChevronUp,
+  ChevronsLeft,
+  ChevronsRight,
   Clock,
   Database,
   DollarSign,
@@ -136,7 +140,15 @@ function timeAgo(iso: string): string {
   return `há ${days}d`;
 }
 
-function StatusBadge({ sub }: { sub: Subscription }) {
+function StatusBadge({ sub, processing }: { sub: Subscription; processing?: boolean }) {
+  if (processing) {
+    return (
+      <Badge variant="secondary" className="gap-1">
+        <Loader2 className="h-3 w-3 animate-spin" />
+        Atualizando…
+      </Badge>
+    );
+  }
   switch (sub.status) {
     case "pending":
       return <Badge variant="secondary">Aguardando 1ª atualização</Badge>;
@@ -515,9 +527,7 @@ function FilterPanel({
   );
 }
 
-// ─── Page sizes ──────────────────────────────────────────────────────────────
-
-const PAGE_SIZE = 50;
+// ─── Page component ──────────────────────────────────────────────────────────
 
 export default function SubscriptionResultsPage() {
   const params = useParams<{ id: string }>();
@@ -528,6 +538,8 @@ export default function SubscriptionResultsPage() {
   const [page, setPage] = useState(1);
   const [deleting, setDeleting] = useState(false);
   const [triggering, setTriggering] = useState(false);
+  const [processing, setProcessing] = useState(false);
+  const [pageSize, setPageSize] = useState(50);
   const [localFilters, setLocalFilters] = useState<LocalFilters>(EMPTY_FILTERS);
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [now, setNow] = useState(Date.now());
@@ -537,6 +549,28 @@ export default function SubscriptionResultsPage() {
     const timer = setInterval(() => setNow(Date.now()), 30_000);
     return () => clearInterval(timer);
   }, []);
+
+  // Poll for results while processing
+  useEffect(() => {
+    if (!processing) return;
+    const poll = setInterval(async () => {
+      try {
+        const resp = await fetch(`/api/subscriptions/${params.id}?raw=1`);
+        if (!resp.ok) return;
+        const json = await resp.json();
+        // Worker finished when lastRefreshedAt is newer than our trigger time
+        const serverRefresh = json.subscription.lastRefreshedAt;
+        const localRefresh = data?.subscription.lastRefreshedAt;
+        if (serverRefresh && serverRefresh !== localRefresh) {
+          setData(json);
+          setLocalFilters(filtersFromSubscription(json.subscription.filters));
+          setProcessing(false);
+          toast.success("Resultados atualizados!");
+        }
+      } catch { /* ignore */ }
+    }, 15_000);
+    return () => clearInterval(poll);
+  }, [processing, params.id, data?.subscription.lastRefreshedAt]);
 
   useEffect(() => {
     async function load() {
@@ -587,18 +621,7 @@ export default function SubscriptionResultsPage() {
         toast.success("Worker disparado!", {
           description: "Os resultados serão atualizados em alguns minutos.",
         });
-        // Optimistically update local state so UI reflects trigger
-        setData((prev) =>
-          prev
-            ? {
-                ...prev,
-                subscription: {
-                  ...prev.subscription,
-                  lastRefreshedAt: new Date().toISOString(),
-                },
-              }
-            : prev,
-        );
+        setProcessing(true);
         setNow(Date.now());
       } else {
         const body = await resp.json();
@@ -674,8 +697,8 @@ export default function SubscriptionResultsPage() {
   const { totalApiResults, refreshedAt } = data;
 
   // Pagination
-  const totalPages = Math.max(1, Math.ceil(filteredResults.length / PAGE_SIZE));
-  const displayItems = filteredResults.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const totalPages = Math.max(1, Math.ceil(filteredResults.length / pageSize));
+  const displayItems = filteredResults.slice((page - 1) * pageSize, page * pageSize);
 
   // KPI values
   let valorTotal = 0;
@@ -698,7 +721,7 @@ export default function SubscriptionResultsPage() {
           </Button>
           <h1 className="text-xl font-bold tracking-tight sm:text-2xl">{sub!.nome}</h1>
           <div className="flex flex-wrap items-center gap-2">
-            <StatusBadge sub={sub!} />
+            <StatusBadge sub={sub!} processing={processing} />
             {refreshedAt && (
               <span className="flex items-center gap-1 text-xs text-muted-foreground">
                 <Clock className="h-3 w-3" />
@@ -894,26 +917,35 @@ export default function SubscriptionResultsPage() {
 
             {/* Pagination */}
             {totalPages > 1 && (
-              <div className="flex items-center justify-between border-t px-4 py-3">
-                <p className="text-xs text-muted-foreground">
-                  Página {page} de {totalPages} · {formatNumber(filteredResults.length)} resultados
-                </p>
-                <div className="flex gap-1">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={page <= 1}
-                    onClick={() => setPage((p) => p - 1)}
-                  >
-                    Anterior
+              <div className="flex flex-col gap-3 border-t px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-muted-foreground">Por página:</span>
+                  <Select value={String(pageSize)} onValueChange={(v) => { setPageSize(Number(v)); setPage(1); }}>
+                    <SelectTrigger className="h-8 w-[70px] text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {[20, 50, 100, 200].map((s) => (
+                        <SelectItem key={s} value={String(s)}>{s}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <span className="text-xs text-muted-foreground">
+                    Página {page} de {totalPages} · {formatNumber(filteredResults.length)} resultados
+                  </span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <Button variant="outline" size="icon" className="h-8 w-8" disabled={page <= 1} onClick={() => setPage(1)}>
+                    <ChevronsLeft className="h-4 w-4" />
                   </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={page >= totalPages}
-                    onClick={() => setPage((p) => p + 1)}
-                  >
-                    Próxima
+                  <Button variant="outline" size="icon" className="h-8 w-8" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  <Button variant="outline" size="icon" className="h-8 w-8" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                  <Button variant="outline" size="icon" className="h-8 w-8" disabled={page >= totalPages} onClick={() => setPage(totalPages)}>
+                    <ChevronsRight className="h-4 w-4" />
                   </Button>
                 </div>
               </div>
