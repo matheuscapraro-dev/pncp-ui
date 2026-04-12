@@ -1,16 +1,19 @@
 import { NextRequest } from "next/server";
 
+export const maxDuration = 300;
+
 const PNCP_BASE = "https://pncp.gov.br/api/consulta";
 
 // ─── Tuning (mirrors worker/src/fetch-pncp.ts) ─────────────────────────────
-const CONCURRENCY = 5;             // parallel requests per wave
-const FETCH_TIMEOUT_MS = 15_000;   // 15s timeout — PNCP can be slow
-const WAVE_DELAY_MS = 500;         // pause between concurrency waves
-const MAX_ATTEMPTS = 5;            // total attempts per page (1 initial + 4 retries)
-const RETRY_PASSES = 3;            // number of full retry sweeps for failures
-const RETRY_WAVE_DELAY_MS = 2_000; // pause between retry waves
-const RETRY_CONCURRENCY = 3;       // concurrency for retries
-const CHUNK_DAYS = 5;              // split date ranges into N-day chunks to avoid rate-limits
+const CONCURRENCY = 3;               // parallel requests per wave
+const FETCH_TIMEOUT_MS = 15_000;     // 15s timeout — PNCP can be slow
+const WAVE_DELAY_MS = 800;           // pause between concurrency waves
+const MAX_ATTEMPTS = 6;              // total attempts per page (1 initial + 5 retries)
+const RETRY_PASSES = 3;              // number of full retry sweeps for failures
+const RETRY_WAVE_DELAY_MS = 2_000;   // pause between retry waves
+const RETRY_CONCURRENCY = 2;         // concurrency for retries
+const CHUNK_DAYS = 5;                // split date ranges into N-day chunks to avoid rate-limits
+const INTER_CHUNK_DELAY_MS = 1_500;  // cooldown between date-range chunks
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
@@ -119,7 +122,7 @@ export async function GET(request: NextRequest) {
 
         if (!resp.ok) {
           if ((resp.status >= 500 || resp.status === 429 || resp.status === 400 || resp.status === 422) && attempt < MAX_ATTEMPTS - 1) {
-            await sleep(800 * (attempt + 1));
+            await sleep(1_000 * (attempt + 1));
             continue;
           }
           throw new Error(`PNCP ${resp.status}: ${text.slice(0, 200)}`);
@@ -129,7 +132,7 @@ export async function GET(request: NextRequest) {
       } catch (err) {
         if (signal.aborted) throw err;
         if (attempt < MAX_ATTEMPTS - 1) {
-          await sleep(800 * (attempt + 1));
+          await sleep(1_000 * (attempt + 1));
           continue;
         }
         throw err;
@@ -191,7 +194,7 @@ export async function GET(request: NextRequest) {
     chunkParams: URLSearchParams,
     send: (obj: unknown) => void,
     grandTotals: { items: number; pages: number; completed: number },
-  ): Promise<void> {
+  ): Promise<number> {
     const first = await fetchPage(1, signal, chunkParams);
     const chunkTotalPages = first.totalPaginas || 1;
     const chunkTotalItems = first.totalRegistros || first.data.length;
@@ -204,7 +207,7 @@ export async function GET(request: NextRequest) {
     send({ type: "meta", totalItems: grandTotals.items, totalPages: grandTotals.pages });
     send({ type: "batch", items: first.data, loadedPages: grandTotals.completed, totalPages: grandTotals.pages });
 
-    if (chunkTotalPages <= 1) return;
+    if (chunkTotalPages <= 1) return 0;
 
     // Fetch remaining pages for this chunk
     const remaining = Array.from({ length: chunkTotalPages - 1 }, (_, i) => i + 2);
@@ -241,6 +244,8 @@ export async function GET(request: NextRequest) {
         chunkParams,
       );
     }
+
+    return failedPages.length;
   }
 
   // ─── Determine date chunks ───────────────────────────────────────────────
@@ -266,28 +271,41 @@ export async function GET(request: NextRequest) {
         controller.enqueue(encoder.encode(JSON.stringify(obj) + "\n"));
       }
 
+      let totalFailedPages = 0;
+
       try {
         if (!dateChunks || dateChunks.length <= 1) {
           // ── No chunking: single date range or no dates (proposta mode) ──
-          await fetchChunk(abortController.signal, baseParams, send, { items: 0, pages: 0, completed: 0 });
+          totalFailedPages += await fetchChunk(abortController.signal, baseParams, send, { items: 0, pages: 0, completed: 0 });
         } else {
           // ── Chunked: iterate over date-range chunks ──
           const grandTotals = { items: 0, pages: 0, completed: 0 };
 
-          for (const [chunkStart, chunkEnd] of dateChunks) {
+          for (let ci = 0; ci < dateChunks.length; ci++) {
             if (abortController.signal.aborted) break;
+
+            // Cooldown between chunks to avoid rate-limiting
+            if (ci > 0) await sleep(INTER_CHUNK_DELAY_MS);
+
+            const [chunkStart, chunkEnd] = dateChunks[ci];
 
             // Clone base params and override dates for this chunk
             const chunkParams = new URLSearchParams(baseParams);
             chunkParams.set("dataInicial", isoToApiDate(chunkStart));
             chunkParams.set("dataFinal", isoToApiDate(chunkEnd));
 
-            await fetchChunk(abortController.signal, chunkParams, send, grandTotals);
+            try {
+              totalFailedPages += await fetchChunk(abortController.signal, chunkParams, send, grandTotals);
+            } catch (chunkErr) {
+              if (abortController.signal.aborted) break;
+              console.error(`Chunk ${ci} (${chunkStart}–${chunkEnd}) failed:`, chunkErr);
+              // Continue to next chunk instead of aborting entire stream
+            }
           }
         }
 
         if (!abortController.signal.aborted) {
-          send({ type: "done" });
+          send({ type: "done", failedPages: totalFailedPages });
         }
       } catch (err) {
         if ((err as Error)?.name !== "AbortError") {

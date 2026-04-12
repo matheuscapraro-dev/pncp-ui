@@ -386,6 +386,9 @@ async function fetchStream(
         }
 
         case "done":
+          if (msg.failedPages > 0) {
+            toast.warning(`${msg.failedPages} página(s) não puderam ser carregadas após várias tentativas.`);
+          }
           dispatch({ type: "FETCH_DONE" });
           return;
 
