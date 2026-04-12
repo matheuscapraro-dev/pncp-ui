@@ -142,14 +142,17 @@ export function SearchForm() {
 
   function daysAgoFromDate(iso: string): number | null {
     if (!iso) return null;
-    const diff = Math.round((Date.now() - new Date(iso).getTime()) / 86400000);
+    const today = new Date(todayISO()).getTime();
+    const target = new Date(iso).getTime();
+    const diff = Math.round((today - target) / 86400000);
     return PAST_OPTIONS.find((o) => o.days === diff)?.days ?? null;
   }
 
   function daysAheadFromDate(iso: string): number | null {
     if (!iso) return null;
-    const diff = Math.round((new Date(iso).getTime() - Date.now()) / 86400000);
-    if (diff <= 0 && iso === todayISO()) return 0;
+    const today = new Date(todayISO()).getTime();
+    const target = new Date(iso).getTime();
+    const diff = Math.round((target - today) / 86400000);
     return FUTURE_OPTIONS.find((o) => o.days === diff)?.days ?? null;
   }
 
