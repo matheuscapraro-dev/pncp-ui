@@ -141,10 +141,12 @@ function reducer(state: State, action: Action): State {
     case "FETCH_PROGRESS": {
       const { items, progress } = action.payload;
       const newAll = [...state.allResults, ...items];
-      const totalItems = state.totalApiResults;
+      // totalItems from progress may grow as new date chunks are discovered
+      const totalItems = Math.max(state.totalApiResults, progress.totalItems);
       return {
         ...state,
         allResults: newAll,
+        totalApiResults: totalItems,
         fetchProgress: { ...progress, loadedItems: newAll.length, totalItems },
       };
     }
@@ -334,6 +336,7 @@ async function fetchStream(
   let buffer = "";
   let metaTotalItems = 0;
   let metaTotalPages = 0;
+  let isFirstBatch = true;
 
   while (true) {
     const { done, value } = await reader.read();
@@ -350,6 +353,7 @@ async function fetchStream(
 
       switch (msg.type) {
         case "meta":
+          // With date chunking, meta is sent per chunk — accumulate totals
           metaTotalItems = msg.totalItems;
           metaTotalPages = msg.totalPages;
           break;
@@ -358,7 +362,8 @@ async function fetchStream(
           const items = msg.items as ResultItem[];
           if (!metaTotalPages) break;
 
-          if (msg.loadedPages === 1) {
+          if (isFirstBatch) {
+            isFirstBatch = false;
             dispatch({
               type: "FETCH_FIRST_PAGE",
               payload: { items, totalItems: metaTotalItems, totalPages: metaTotalPages },
@@ -372,7 +377,7 @@ async function fetchStream(
                   loadedPages: msg.loadedPages,
                   totalPages: metaTotalPages,
                   loadedItems: 0, // computed in reducer from allResults.length
-                  totalItems: 0, // computed in reducer from totalApiResults
+                  totalItems: metaTotalItems,
                 },
               },
             });

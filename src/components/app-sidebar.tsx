@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { FileText, Moon, Sun, Menu, Search, Bell, Clock, AlertCircle, Loader2 } from "lucide-react";
+import { FileText, Moon, Sun, Menu, Search, Bell, Clock, AlertCircle, Loader2, BookOpen } from "lucide-react";
 import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -29,6 +29,7 @@ function SidebarContent({ onNavClick }: { onNavClick?: () => void }) {
   const { subscriptions, loading: subsLoading } = useSubscriptions();
 
   const isHome = pathname === "/";
+  const isConsulta = pathname === "/consulta";
 
   return (
     <>
@@ -42,6 +43,12 @@ function SidebarContent({ onNavClick }: { onNavClick?: () => void }) {
           <nav className="flex flex-col gap-1">
             <Link href="/" onClick={onNavClick}>
               <span className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium ${isHome ? "bg-sidebar-accent text-sidebar-accent-foreground" : "text-sidebar-foreground hover:bg-sidebar-accent/50"}`}>
+                <BookOpen className="h-4 w-4" />
+                Tutorial
+              </span>
+            </Link>
+            <Link href="/consulta" onClick={onNavClick}>
+              <span className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium ${isConsulta ? "bg-sidebar-accent text-sidebar-accent-foreground" : "text-sidebar-foreground hover:bg-sidebar-accent/50"}`}>
                 <Search className="h-4 w-4" />
                 Consulta PNCP
               </span>

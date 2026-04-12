@@ -10,6 +10,7 @@ const MAX_ATTEMPTS = 5;            // total attempts per page (1 initial + 4 ret
 const RETRY_PASSES = 3;            // number of full retry sweeps for failures
 const RETRY_WAVE_DELAY_MS = 2_000; // pause between retry waves
 const RETRY_CONCURRENCY = 3;       // concurrency for retries
+const CHUNK_DAYS = 5;              // split date ranges into N-day chunks to avoid rate-limits
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
@@ -17,15 +18,54 @@ function sleep(ms: number): Promise<void> {
 
 type PageResult = { data: unknown[]; totalRegistros: number; totalPaginas: number };
 
+// ─── Date-range chunking helpers (mirrored from worker/src/index.ts) ─────────
+
+function apiDateToISO(apiDate: string): string {
+  return `${apiDate.slice(0, 4)}-${apiDate.slice(4, 6)}-${apiDate.slice(6, 8)}`;
+}
+
+function isoToApiDate(iso: string): string {
+  return iso.replace(/-/g, "");
+}
+
+function dateFromISO(iso: string): Date {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+
+function dateToISO(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function splitDateRange(startISO: string, endISO: string, chunkDays: number): [string, string][] {
+  const chunks: [string, string][] = [];
+  const end = dateFromISO(endISO);
+  let cursor = dateFromISO(startISO);
+
+  while (cursor <= end) {
+    const chunkEnd = new Date(cursor);
+    chunkEnd.setDate(chunkEnd.getDate() + chunkDays - 1);
+    const actualEnd = chunkEnd > end ? end : chunkEnd;
+    chunks.push([dateToISO(cursor), dateToISO(actualEnd)]);
+    cursor = new Date(actualEnd);
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  return chunks;
+}
+
 /**
  * Streaming PNCP fetcher.
  *
- * Fetches ALL pages server-side in controlled waves and streams results
- * back as NDJSON. Failed pages are retried in multiple passes with
- * exponential back-off so that 500+ page result sets complete reliably.
+ * Splits the date range into small chunks (CHUNK_DAYS) to avoid PNCP
+ * rate-limiting on large result sets, then fetches ALL pages for each
+ * chunk in controlled waves. Results are streamed back as NDJSON.
  *
  * Protocol (one JSON object per line):
- *   { type: "meta", totalItems, totalPages }
+ *   { type: "meta", totalItems, totalPages }   ← sent per chunk (additive)
  *   { type: "batch", items: [...], loadedPages, totalPages }
  *   { type: "done" }
  *   { type: "error", message }
@@ -51,22 +91,23 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  function buildUrl(page: number): string {
+  function buildUrl(page: number, overrideParams?: URLSearchParams): string {
     const url = new URL(`${PNCP_BASE}/${endpoint}`);
-    for (const [k, v] of baseParams.entries()) url.searchParams.set(k, v);
+    const src = overrideParams ?? baseParams;
+    for (const [k, v] of src.entries()) url.searchParams.set(k, v);
     url.searchParams.set("pagina", String(page));
     url.searchParams.set("tamanhoPagina", String(pageSize));
     return url.toString();
   }
 
   /** Fetch a single page with built-in per-attempt retry & back-off. */
-  async function fetchPage(page: number, signal: AbortSignal): Promise<PageResult> {
+  async function fetchPage(page: number, signal: AbortSignal, overrideParams?: URLSearchParams): Promise<PageResult> {
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
       try {
         const timeout = AbortSignal.timeout(FETCH_TIMEOUT_MS);
         const combined = AbortSignal.any([signal, timeout]);
 
-        const resp = await fetch(buildUrl(page), {
+        const resp = await fetch(buildUrl(page, overrideParams), {
           headers: { Accept: "application/json" },
           signal: combined,
         });
@@ -78,7 +119,7 @@ export async function GET(request: NextRequest) {
 
         if (!resp.ok) {
           if ((resp.status >= 500 || resp.status === 429 || resp.status === 400 || resp.status === 422) && attempt < MAX_ATTEMPTS - 1) {
-            await sleep(800 * (attempt + 1)); // 800ms, 1600ms, 2400ms
+            await sleep(800 * (attempt + 1));
             continue;
           }
           throw new Error(`PNCP ${resp.status}: ${text.slice(0, 200)}`);
@@ -99,7 +140,7 @@ export async function GET(request: NextRequest) {
 
   /**
    * Fetch an array of pages in controlled waves.
-   * Returns { items, failedPages }.
+   * Returns list of failed page numbers.
    */
   async function fetchWaves(
     pages: number[],
@@ -107,6 +148,7 @@ export async function GET(request: NextRequest) {
     concurrency: number,
     waveDelay: number,
     onBatch: (items: unknown[], pagesCompleted: number) => void,
+    overrideParams?: URLSearchParams,
   ): Promise<number[]> {
     const failed: number[] = [];
 
@@ -115,7 +157,7 @@ export async function GET(request: NextRequest) {
 
       const wave = pages.slice(i, i + concurrency);
       const results = await Promise.allSettled(
-        wave.map((p) => fetchPage(p, signal)),
+        wave.map((p) => fetchPage(p, signal, overrideParams)),
       );
 
       if (signal.aborted) break;
@@ -132,7 +174,6 @@ export async function GET(request: NextRequest) {
 
       onBatch(waveItems, wave.length);
 
-      // Delay between waves (skip after last)
       const isLast = i + concurrency >= pages.length;
       if (!isLast && !signal.aborted) {
         await sleep(waveDelay);
@@ -140,6 +181,79 @@ export async function GET(request: NextRequest) {
     }
 
     return failed;
+  }
+
+  /**
+   * Fetch all pages for a single date-range chunk (page-1 discover + waves + retries).
+   */
+  async function fetchChunk(
+    signal: AbortSignal,
+    chunkParams: URLSearchParams,
+    send: (obj: unknown) => void,
+    grandTotals: { items: number; pages: number; completed: number },
+  ): Promise<void> {
+    const first = await fetchPage(1, signal, chunkParams);
+    const chunkTotalPages = first.totalPaginas || 1;
+    const chunkTotalItems = first.totalRegistros || first.data.length;
+
+    // Accumulate into grand totals and notify client
+    grandTotals.items += chunkTotalItems;
+    grandTotals.pages += chunkTotalPages;
+    grandTotals.completed += 1;
+
+    send({ type: "meta", totalItems: grandTotals.items, totalPages: grandTotals.pages });
+    send({ type: "batch", items: first.data, loadedPages: grandTotals.completed, totalPages: grandTotals.pages });
+
+    if (chunkTotalPages <= 1) return;
+
+    // Fetch remaining pages for this chunk
+    const remaining = Array.from({ length: chunkTotalPages - 1 }, (_, i) => i + 2);
+
+    let failedPages = await fetchWaves(
+      remaining,
+      signal,
+      CONCURRENCY,
+      WAVE_DELAY_MS,
+      (items, count) => {
+        grandTotals.completed += count;
+        send({ type: "batch", items, loadedPages: grandTotals.completed, totalPages: grandTotals.pages });
+      },
+      chunkParams,
+    );
+
+    // Retry passes with increasing back-off
+    for (let pass = 0; pass < RETRY_PASSES && failedPages.length > 0; pass++) {
+      if (signal.aborted) break;
+
+      await sleep(RETRY_WAVE_DELAY_MS * Math.pow(2, pass));
+      if (signal.aborted) break;
+
+      failedPages = await fetchWaves(
+        failedPages,
+        signal,
+        RETRY_CONCURRENCY,
+        RETRY_WAVE_DELAY_MS,
+        (items) => {
+          if (items.length > 0) {
+            send({ type: "batch", items, loadedPages: grandTotals.completed, totalPages: grandTotals.pages });
+          }
+        },
+        chunkParams,
+      );
+    }
+  }
+
+  // ─── Determine date chunks ───────────────────────────────────────────────
+
+  const rawDataInicial = baseParams.get("dataInicial");  // API format: "20260405"
+  const rawDataFinal = baseParams.get("dataFinal");      // API format: "20260412"
+
+  // Only chunk when both dates are present (mode "proposta" has no dataInicial)
+  let dateChunks: [string, string][] | null = null;
+  if (rawDataInicial && rawDataFinal) {
+    const startISO = apiDateToISO(rawDataInicial);
+    const endISO = apiDateToISO(rawDataFinal);
+    dateChunks = splitDateRange(startISO, endISO, CHUNK_DAYS);
   }
 
   const encoder = new TextEncoder();
@@ -153,54 +267,23 @@ export async function GET(request: NextRequest) {
       }
 
       try {
-        // 1. First page — discover totals
-        const first = await fetchPage(1, abortController.signal);
-        const totalPages = first.totalPaginas || 1;
-        const totalItems = first.totalRegistros || first.data.length;
+        if (!dateChunks || dateChunks.length <= 1) {
+          // ── No chunking: single date range or no dates (proposta mode) ──
+          await fetchChunk(abortController.signal, baseParams, send, { items: 0, pages: 0, completed: 0 });
+        } else {
+          // ── Chunked: iterate over date-range chunks ──
+          const grandTotals = { items: 0, pages: 0, completed: 0 };
 
-        send({ type: "meta", totalItems, totalPages });
-        send({ type: "batch", items: first.data, loadedPages: 1, totalPages });
+          for (const [chunkStart, chunkEnd] of dateChunks) {
+            if (abortController.signal.aborted) break;
 
-        if (totalPages <= 1) {
-          send({ type: "done" });
-          controller.close();
-          return;
-        }
+            // Clone base params and override dates for this chunk
+            const chunkParams = new URLSearchParams(baseParams);
+            chunkParams.set("dataInicial", isoToApiDate(chunkStart));
+            chunkParams.set("dataFinal", isoToApiDate(chunkEnd));
 
-        // 2. Fetch remaining pages
-        const remaining = Array.from({ length: totalPages - 1 }, (_, i) => i + 2);
-        let completedPages = 1;
-
-        let failedPages = await fetchWaves(
-          remaining,
-          abortController.signal,
-          CONCURRENCY,
-          WAVE_DELAY_MS,
-          (items, count) => {
-            completedPages += count;
-            send({ type: "batch", items, loadedPages: completedPages, totalPages });
-          },
-        );
-
-        // 3. Multiple retry passes with increasing back-off
-        for (let pass = 0; pass < RETRY_PASSES && failedPages.length > 0; pass++) {
-          if (abortController.signal.aborted) break;
-
-          // Exponential cooldown: 2s, 4s, 8s before each pass
-          await sleep(RETRY_WAVE_DELAY_MS * Math.pow(2, pass));
-          if (abortController.signal.aborted) break;
-
-          failedPages = await fetchWaves(
-            failedPages,
-            abortController.signal,
-            RETRY_CONCURRENCY,
-            RETRY_WAVE_DELAY_MS,
-            (items) => {
-              if (items.length > 0) {
-                send({ type: "batch", items, loadedPages: totalPages, totalPages });
-              }
-            },
-          );
+            await fetchChunk(abortController.signal, chunkParams, send, grandTotals);
+          }
         }
 
         if (!abortController.signal.aborted) {
