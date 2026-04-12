@@ -45,7 +45,7 @@ export function useFilterPresets() {
   }, []);
 
   const savePreset = useCallback(
-    (nome: string, filters: Partial<FilterState>) => {
+    (nome: string, filters: Partial<FilterState>, relativeDateRange?: number) => {
       setPresets((prev) => {
         const next = [
           ...prev,
@@ -54,6 +54,7 @@ export function useFilterPresets() {
             nome,
             filters,
             createdAt: new Date().toISOString(),
+            ...(relativeDateRange != null ? { relativeDateRange } : {}),
           },
         ];
         persistPresets(next);

@@ -339,4 +339,6 @@ export interface FilterPreset {
   nome: string;
   filters: Partial<FilterState>;
   createdAt: string;
+  /** When set, dates are recalculated as "last N days" on apply */
+  relativeDateRange?: number;
 }

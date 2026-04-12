@@ -72,6 +72,7 @@ export function SearchForm() {
   const [activePresetId, setActivePresetId] = useState<string | null>(null);
   const [showSaveInput, setShowSaveInput] = useState(false);
   const [presetName, setPresetName] = useState("");
+  const [presetDateRange, setPresetDateRange] = useState<number | null>(null);
 
   const isContratacao = isContratacaoMode(filters.searchMode);
   const needsDates = filters.searchMode !== "proposta";
@@ -123,7 +124,10 @@ export function SearchForm() {
   function applyFilterPreset(presetId: string) {
     const preset = presets.find((p) => p.id === presetId);
     if (!preset) return;
-    dispatch({ type: "SET_FILTERS", payload: { ...preset.filters, pagina: 1 } });
+    const datePart = preset.relativeDateRange
+      ? { dataInicial: daysAgoISO(preset.relativeDateRange), dataFinal: todayISO() }
+      : {};
+    dispatch({ type: "SET_FILTERS", payload: { ...preset.filters, ...datePart, pagina: 1 } });
     setActivePresetId(presetId);
     setShowApiAdvanced(true);
     toast.success(`Preset "${preset.nome}" aplicado`);
@@ -152,8 +156,9 @@ export function SearchForm() {
     if (filters.cnpj) toSave.cnpj = filters.cnpj;
     if (filters.codigoModalidadeContratacao != null && filters.codigoModalidadeContratacao !== 6)
       toSave.codigoModalidadeContratacao = filters.codigoModalidadeContratacao;
-    savePreset(name, toSave);
+    savePreset(name, toSave, presetDateRange ?? undefined);
     setPresetName("");
+    setPresetDateRange(null);
     setShowSaveInput(false);
     toast.success(`Preset "${name}" salvo!`);
   }
@@ -212,6 +217,9 @@ export function SearchForm() {
                 onClick={() => applyFilterPreset(preset.id)}
               >
                 {preset.nome}
+                {preset.relativeDateRange && (
+                  <Badge variant="secondary" className="ml-1 h-4 px-1 text-[9px]">{preset.relativeDateRange}d</Badge>
+                )}
               </Button>
               <Button
                 type="button"
@@ -379,6 +387,16 @@ export function SearchForm() {
               <Input className="h-7 w-32 text-xs sm:w-40" placeholder="Nome do preset..."
                 value={presetName} onChange={(e) => setPresetName(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleSavePreset(); } if (e.key === "Escape") setShowSaveInput(false); }} autoFocus />
+              <Select value={presetDateRange != null ? String(presetDateRange) : "none"}
+                onValueChange={(v) => setPresetDateRange(v === "none" ? null : Number(v))}>
+                <SelectTrigger className="h-7 w-20 text-[10px]"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Sem data</SelectItem>
+                  {DATE_PRESETS.map((p) => (
+                    <SelectItem key={p.days} value={String(p.days)}>{p.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               <Button type="button" size="sm" className="h-7 px-2 text-xs" onClick={handleSavePreset}>OK</Button>
               <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setShowSaveInput(false)}><X className="h-3 w-3" /></Button>
             </div>
