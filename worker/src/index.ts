@@ -11,20 +11,22 @@
  *   6. Updates subscription metadata
  */
 
-import { loadSubscriptions, saveSubscriptions, saveResults, saveRawResults, acquireLock, releaseLock } from "./blob.js";
+import { loadSubscriptions, saveSubscriptions, saveResults, saveRawResults, acquireLock, releaseLock, readTriggerRequest, deleteTriggerRequest } from "./blob.js";
 import { fetchAllPages } from "./fetch-pncp.js";
 import { applyFilters } from "./apply-filters.js";
 import type { Subscription, SubscriptionFilters, SubscriptionResultsEnvelope, SubscriptionRawEnvelope } from "./types.js";
 
 // ─── Crash handlers ──────────────────────────────────────────────────────────
 
-process.on("SIGTERM", () => {
-  console.log("\n⚠ SIGTERM recebido — processo será encerrado pelo host.");
+process.on("SIGTERM", async () => {
+  console.log("\n⚠ SIGTERM recebido — liberando lock e encerrando.");
+  await releaseLock().catch(() => {});
   process.exit(0);
 });
 
-process.on("SIGINT", () => {
-  console.log("\n⚠ SIGINT recebido — encerrando.");
+process.on("SIGINT", async () => {
+  console.log("\n⚠ SIGINT recebido — liberando lock e encerrando.");
+  await releaseLock().catch(() => {});
   process.exit(0);
 });
 
@@ -311,7 +313,18 @@ async function processSubscription(sub: Subscription): Promise<Partial<Subscript
 
 async function main() {
   const mainT0 = Date.now();
-  const targetSubscriptionId = process.env.SUBSCRIPTION_ID?.trim() || undefined;
+
+  // Determine target: trigger-request blob (from API) > SUBSCRIPTION_ID env var > all
+  let targetSubscriptionId: string | undefined;
+  const triggerReq = await readTriggerRequest();
+  if (triggerReq) {
+    targetSubscriptionId = triggerReq.subscriptionId;
+    console.log(`📨 Trigger request encontrado: ${targetSubscriptionId} (solicitado em ${triggerReq.requestedAt})`);
+    // Delete immediately so future scheduled runs don't pick it up
+    await deleteTriggerRequest();
+  } else {
+    targetSubscriptionId = process.env.SUBSCRIPTION_ID?.trim() || undefined;
+  }
 
   console.log("═══════════════════════════════════════════════════════════");
   console.log("  PNCP Subscription Worker");

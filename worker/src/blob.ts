@@ -15,6 +15,7 @@ const INDEX_PATH = "subscriptions/index.json";
 const RESULTS_PREFIX = "subscriptions/results/";
 const RAW_PREFIX = "subscriptions/raw/";
 const LOCK_PATH = "subscriptions/worker-lock.json";
+const TRIGGER_REQUEST_PATH = "subscriptions/trigger-request.json";
 
 /** Lock is considered stale after 30 minutes (crashed worker). */
 const LOCK_TTL_MS = 30 * 60 * 1000;
@@ -174,5 +175,33 @@ export async function releaseLock(): Promise<void> {
     if (blob) await del(blob.url);
   } catch {
     // Best-effort — stale lock will be broken by TTL
+  }
+}
+
+// ─── Trigger request ─────────────────────────────────────────────────────────
+
+export interface TriggerRequest {
+  subscriptionId: string;
+  requestedAt: string;
+}
+
+/**
+ * Read a trigger-request blob written by the Next.js API.
+ * Returns the request or null if none exists.
+ */
+export async function readTriggerRequest(): Promise<TriggerRequest | null> {
+  return readBlob<TriggerRequest>(TRIGGER_REQUEST_PATH);
+}
+
+/**
+ * Delete the trigger-request blob so it isn't picked up by future runs.
+ */
+export async function deleteTriggerRequest(): Promise<void> {
+  try {
+    const { blobs } = await list({ prefix: TRIGGER_REQUEST_PATH, limit: 1 });
+    const blob = blobs.find((b) => b.pathname === TRIGGER_REQUEST_PATH);
+    if (blob) await del(blob.url);
+  } catch {
+    // Best-effort
   }
 }

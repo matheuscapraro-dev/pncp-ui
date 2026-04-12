@@ -1,27 +1,32 @@
 /**
- * Trigger the PNCP worker via the Render API.
+ * Trigger the PNCP worker via the Render cron API.
  *
- * Two strategies depending on the context:
+ * Flow:
+ * 1. If a `subscriptionId` is provided, write a trigger-request blob so the
+ *    worker knows to process only that subscription.
+ * 2. Call `POST /v1/cron-jobs/{id}/runs` to start the cron.
  *
- * 1. **Cron trigger** (`POST /v1/cron-jobs/{id}/runs`)
- *    Triggers the cron service with its configured CMD. No way to pass env vars.
- *    Used as the primary trigger and as fallback when one-off jobs fail.
- *
- * 2. **One-off job** (`POST /v1/services/{id}/jobs`)
- *    Creates a short-lived job with a custom `startCommand`, allowing us to inject
- *    `SUBSCRIPTION_ID=<uuid>` so the worker processes only one subscription.
- *    Used for targeted ad-hoc runs.
+ * One-off jobs (`POST /v1/services/{id}/jobs`) are NOT used because cron
+ * services on Render don't propagate env vars to one-off jobs, causing
+ * silent failures.
  *
  * Returns `{ ok, error? }` so callers can surface real errors to the user.
  */
 
+import { put, get } from "@vercel/blob";
+
 const RENDER_API = "https://api.render.com/v1";
-const TIMEOUT_MS = 8_000;
-const DEFAULT_START_CMD = "node --max-old-space-size=512 dist/index.js";
+const TIMEOUT_MS = 10_000;
+const TRIGGER_REQUEST_PATH = "subscriptions/trigger-request.json";
 
 export interface TriggerResult {
   ok: boolean;
   error?: string;
+}
+
+export interface TriggerRequest {
+  subscriptionId: string;
+  requestedAt: string;
 }
 
 function getConfig(): { apiKey: string; serviceId: string } | null {
@@ -31,22 +36,44 @@ function getConfig(): { apiKey: string; serviceId: string } | null {
   return { apiKey, serviceId };
 }
 
-function authHeaders(apiKey: string): Record<string, string> {
-  return {
-    Authorization: `Bearer ${apiKey}`,
-    Accept: "application/json",
-    "Content-Type": "application/json",
+/** Write a trigger-request blob so the worker processes a single subscription. */
+async function writeTriggerRequest(subscriptionId: string): Promise<void> {
+  const payload: TriggerRequest = {
+    subscriptionId,
+    requestedAt: new Date().toISOString(),
   };
+  await put(TRIGGER_REQUEST_PATH, JSON.stringify(payload), {
+    access: "private",
+    addRandomSuffix: false,
+    allowOverwrite: true,
+    contentType: "application/json",
+  });
 }
 
-/**
- * Strategy 1: Trigger a cron job run.
- * Works for `crn-*` service IDs. Runs the cron's configured CMD.
- */
+/** Check if the worker lock is currently active (another run in progress). */
+async function isWorkerLocked(): Promise<boolean> {
+  const LOCK_PATH = "subscriptions/worker-lock.json";
+  const LOCK_TTL_MS = 30 * 60 * 1000;
+  try {
+    const result = await get(LOCK_PATH, { access: "private" });
+    if (!result || result.statusCode !== 200 || !result.stream) return false;
+    const text = await new Response(result.stream).text();
+    const lock = JSON.parse(text) as { startedAt: string };
+    const age = Date.now() - new Date(lock.startedAt).getTime();
+    return age < LOCK_TTL_MS;
+  } catch {
+    return false;
+  }
+}
+
+/** Trigger the cron run via Render API. */
 async function triggerCronRun(apiKey: string, serviceId: string): Promise<TriggerResult> {
   const resp = await fetch(`${RENDER_API}/cron-jobs/${serviceId}/runs`, {
     method: "POST",
-    headers: authHeaders(apiKey),
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      Accept: "application/json",
+    },
     signal: AbortSignal.timeout(TIMEOUT_MS),
   });
 
@@ -57,35 +84,11 @@ async function triggerCronRun(apiKey: string, serviceId: string): Promise<Trigge
 }
 
 /**
- * Strategy 2: Create a one-off job with a custom startCommand.
- * Allows injecting SUBSCRIPTION_ID for targeted processing.
- */
-async function createOneOffJob(
-  apiKey: string,
-  serviceId: string,
-  subscriptionId: string,
-): Promise<TriggerResult> {
-  const startCommand = `SUBSCRIPTION_ID=${subscriptionId} ${DEFAULT_START_CMD}`;
-
-  const resp = await fetch(`${RENDER_API}/services/${serviceId}/jobs`, {
-    method: "POST",
-    headers: authHeaders(apiKey),
-    body: JSON.stringify({ startCommand }),
-    signal: AbortSignal.timeout(TIMEOUT_MS),
-  });
-
-  if (resp.ok || resp.status === 201) return { ok: true };
-
-  const body = await resp.text().catch(() => "");
-  return { ok: false, error: `Render one-off job ${resp.status}: ${body}` };
-}
-
-/**
  * Public API — triggers the worker.
  *
- * - Without `subscriptionId`: triggers the cron run (processes all enabled).
- * - With `subscriptionId`: tries a one-off job first (targeted); falls back to
- *   cron trigger if one-off jobs aren't supported for this service type.
+ * - Without `subscriptionId`: triggers the cron (processes all enabled subs).
+ * - With `subscriptionId`: writes a trigger-request blob, then triggers cron.
+ *   The worker reads the blob and processes only that subscription.
  */
 export async function triggerWorker(subscriptionId?: string): Promise<TriggerResult> {
   const cfg = getConfig();
@@ -95,18 +98,21 @@ export async function triggerWorker(subscriptionId?: string): Promise<TriggerRes
 
   const { apiKey, serviceId } = cfg;
 
-  // No subscription ID — just trigger the cron
-  if (!subscriptionId) {
-    return triggerCronRun(apiKey, serviceId);
+  // Check if another worker run is active
+  const locked = await isWorkerLocked();
+  if (locked) {
+    return { ok: false, error: "Worker já está em execução. Tente novamente em alguns minutos." };
   }
 
-  // Try targeted one-off job first
-  const oneOff = await createOneOffJob(apiKey, serviceId, subscriptionId);
-  if (oneOff.ok) return oneOff;
+  // Write trigger request so worker knows which subscription to process
+  if (subscriptionId) {
+    try {
+      await writeTriggerRequest(subscriptionId);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Erro ao gravar trigger request";
+      return { ok: false, error: msg };
+    }
+  }
 
-  // Fallback: trigger full cron run (processes all, but at least it runs)
-  console.warn(
-    `[trigger-worker] One-off job failed (${oneOff.error}), falling back to cron trigger.`,
-  );
   return triggerCronRun(apiKey, serviceId);
 }
