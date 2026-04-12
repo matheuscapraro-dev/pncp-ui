@@ -47,6 +47,12 @@ export function daysAgoISO(days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+export function daysFromNowISO(days: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
 /**
  * Converts an ISO date (YYYY-MM-DD) to the PNCP API format (AAAAMMDD).
  * E.g. "2025-01-15" → "20250115"

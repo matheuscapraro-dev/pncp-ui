@@ -28,7 +28,6 @@ import {
   Loader2,
   ChevronDown,
   ChevronUp,
-  CalendarDays,
   RotateCcw,
   SlidersHorizontal,
   Save,
@@ -38,18 +37,29 @@ import {
   Filter,
 } from "lucide-react";
 import { toast } from "sonner";
-import { daysAgoISO, todayISO } from "@/lib/utils";
+import { daysAgoISO, daysFromNowISO, todayISO } from "@/lib/utils";
 import type { SearchMode } from "@/types/pncp";
 import { useFilterPresets } from "@/hooks/use-filter-presets";
 import { useSubscriptions } from "@/hooks/use-subscriptions";
 import { SubscribeDialog } from "@/components/subscribe-dialog";
 
-const DATE_PRESETS = [
-  { label: "7d", days: 7 },
-  { label: "15d", days: 15 },
-  { label: "30d", days: 30 },
-  { label: "60d", days: 60 },
-  { label: "90d", days: 90 },
+const PAST_OPTIONS = [
+  { label: "7 dias", days: 7 },
+  { label: "15 dias", days: 15 },
+  { label: "30 dias", days: 30 },
+  { label: "60 dias", days: 60 },
+  { label: "90 dias", days: 90 },
+  { label: "6 meses", days: 180 },
+];
+
+const FUTURE_OPTIONS = [
+  { label: "Hoje", days: 0 },
+  { label: "7 dias", days: 7 },
+  { label: "15 dias", days: 15 },
+  { label: "30 dias", days: 30 },
+  { label: "60 dias", days: 60 },
+  { label: "90 dias", days: 90 },
+  { label: "6 meses", days: 180 },
 ];
 
 const MODE_LABELS: Record<SearchMode, string> = {
@@ -116,11 +126,31 @@ export function SearchForm() {
     }
   }
 
-  function applyDatePreset(days: number) {
+  function applyPastDays(days: number) {
     dispatch({
       type: "SET_FILTERS",
-      payload: { dataInicial: daysAgoISO(days), dataFinal: todayISO(), pagina: 1 },
+      payload: { dataInicial: daysAgoISO(days), pagina: 1 },
     });
+  }
+
+  function applyFutureDays(days: number) {
+    dispatch({
+      type: "SET_FILTERS",
+      payload: { dataFinal: days === 0 ? todayISO() : daysFromNowISO(days), pagina: 1 },
+    });
+  }
+
+  function daysAgoFromDate(iso: string): number | null {
+    if (!iso) return null;
+    const diff = Math.round((Date.now() - new Date(iso).getTime()) / 86400000);
+    return PAST_OPTIONS.find((o) => o.days === diff)?.days ?? null;
+  }
+
+  function daysAheadFromDate(iso: string): number | null {
+    if (!iso) return null;
+    const diff = Math.round((new Date(iso).getTime() - Date.now()) / 86400000);
+    if (diff <= 0 && iso === todayISO()) return 0;
+    return FUTURE_OPTIONS.find((o) => o.days === diff)?.days ?? null;
   }
 
   function applyFilterPreset(presetId: string) {
@@ -255,18 +285,38 @@ export function SearchForm() {
           {/* Date range */}
           {needsDates && (
             <div className="space-y-1">
-              <Label htmlFor="dataInicial" className="text-xs">Data Inicial *</Label>
-              <Input id="dataInicial" type="date" value={filters.dataInicial}
-                onChange={(e) => updateFilter("dataInicial", e.target.value)}
-                className={`h-8 text-sm ${errors.dataInicial ? "border-destructive" : ""}`} />
+              <Label className="text-xs">Data Inicial *</Label>
+              <Select
+                value={(() => { const d = daysAgoFromDate(filters.dataInicial); return d != null ? String(d) : "custom"; })()}
+                onValueChange={(v) => { if (v !== "custom") applyPastDays(Number(v)); }}>
+                <SelectTrigger className={`h-8 text-sm ${errors.dataInicial ? "border-destructive" : ""}`}>
+                  <SelectValue placeholder="Selecione" />
+                </SelectTrigger>
+                <SelectContent>
+                  {PAST_OPTIONS.map((o) => <SelectItem key={o.days} value={String(o.days)}>{o.label} atrás</SelectItem>)}
+                  {daysAgoFromDate(filters.dataInicial) == null && filters.dataInicial && (
+                    <SelectItem value="custom">{filters.dataInicial}</SelectItem>
+                  )}
+                </SelectContent>
+              </Select>
               {errors.dataInicial && <p className="text-xs text-destructive">{errors.dataInicial}</p>}
             </div>
           )}
           <div className="space-y-1">
-            <Label htmlFor="dataFinal" className="text-xs">Data Final *</Label>
-            <Input id="dataFinal" type="date" value={filters.dataFinal}
-              onChange={(e) => updateFilter("dataFinal", e.target.value)}
-              className={`h-8 text-sm ${errors.dataFinal ? "border-destructive" : ""}`} />
+            <Label className="text-xs">Data Final *</Label>
+            <Select
+              value={(() => { const d = daysAheadFromDate(filters.dataFinal); return d != null ? String(d) : "custom"; })()}
+              onValueChange={(v) => { if (v !== "custom") applyFutureDays(Number(v)); }}>
+              <SelectTrigger className={`h-8 text-sm ${errors.dataFinal ? "border-destructive" : ""}`}>
+                <SelectValue placeholder="Selecione" />
+              </SelectTrigger>
+              <SelectContent>
+                {FUTURE_OPTIONS.map((o) => <SelectItem key={o.days} value={String(o.days)}>{o.days === 0 ? "Hoje" : `${o.label} à frente`}</SelectItem>)}
+                {daysAheadFromDate(filters.dataFinal) == null && filters.dataFinal && (
+                  <SelectItem value="custom">{filters.dataFinal}</SelectItem>
+                )}
+              </SelectContent>
+            </Select>
             {errors.dataFinal && <p className="text-xs text-destructive">{errors.dataFinal}</p>}
           </div>
 
@@ -289,17 +339,6 @@ export function SearchForm() {
             </div>
           )}
         </div>
-
-        {/* Date presets */}
-        {needsDates && (
-          <div className="flex flex-wrap items-center gap-1.5">
-            <CalendarDays className="h-3 w-3 text-muted-foreground" />
-            {DATE_PRESETS.map((p) => (
-              <Button key={p.days} type="button" variant="outline" size="sm" className="h-5 px-1.5 text-[10px]"
-                onClick={() => applyDatePreset(p.days)}>{p.label}</Button>
-            ))}
-          </div>
-        )}
 
         {/* API Advanced toggle */}
         <Button type="button" variant="ghost" size="sm" className="gap-1.5 text-muted-foreground hover:text-foreground h-6 px-1"
@@ -395,7 +434,7 @@ export function SearchForm() {
                 <SelectTrigger className="h-7 w-20 text-[10px]"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">Sem data</SelectItem>
-                  {DATE_PRESETS.map((p) => (
+                  {PAST_OPTIONS.map((p) => (
                     <SelectItem key={p.days} value={String(p.days)}>{p.label}</SelectItem>
                   ))}
                 </SelectContent>
