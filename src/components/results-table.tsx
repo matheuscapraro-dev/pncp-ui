@@ -189,7 +189,7 @@ function MobileAtaCard({ c }: { c: AtaRegistroPrecoDTO }) {
 
 // ─── Main component ──────────────────────────────────────────────────────────
 
-export function ResultsTable() {
+export function ResultsTable({ onSelectItem }: { onSelectItem?: (item: CompraPublicacaoDTO) => void }) {
   const router = useRouter();
   const { state, dispatch, filteredResults, displayResults } = useLicitacoes();
   const { loading, error, sortByPriority, allResults } = state;
@@ -277,7 +277,7 @@ export function ResultsTable() {
               <MobileContratacaoCard
                 key={c.numeroControlePNCP ?? idx}
                 c={c}
-                onClick={() => router.push(buildDetailHref(c))}
+                onClick={() => onSelectItem ? onSelectItem(c) : router.push(buildDetailHref(c))}
               />
             ))}
           </div>
@@ -309,7 +309,7 @@ export function ResultsTable() {
                     const externalUrl = c.linkSistemaOrigem || null;
                     return (
                       <TableRow key={rowId} className="cursor-pointer transition-colors hover:bg-muted/50"
-                        onClick={() => router.push(href)}>
+                        onClick={() => onSelectItem ? onSelectItem(c) : router.push(href)}>
                         <TableCell className="max-w-[300px]">
                           <Tooltip>
                             <TooltipTrigger asChild>
@@ -350,7 +350,7 @@ export function ResultsTable() {
                             <Tooltip>
                               <TooltipTrigger asChild>
                                 <Button variant="ghost" size="icon" className="h-7 w-7"
-                                  onClick={(e) => { e.stopPropagation(); router.push(href); }}>
+                                  onClick={(e) => { e.stopPropagation(); onSelectItem ? onSelectItem(c) : router.push(href); }}>
                                   <Eye className="h-3.5 w-3.5" />
                                 </Button>
                               </TooltipTrigger>
