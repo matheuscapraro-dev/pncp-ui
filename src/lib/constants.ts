@@ -36,6 +36,12 @@ export const SITUACAO_COMPRA: Record<string, string> = {
   "4": "Suspensa",
 };
 
+export const STATUS_PROPOSTA: Record<string, string> = {
+  a_receber: "A Receber / Recebendo Proposta",
+  em_julgamento: "Em Julgamento / Propostas Encerradas",
+  encerrada: "Encerrada",
+};
+
 export const ESFERAS = [
   { id: "F", nome: "Federal" },
   { id: "E", nome: "Estadual" },

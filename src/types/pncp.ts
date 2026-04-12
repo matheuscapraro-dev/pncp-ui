@@ -309,6 +309,7 @@ export interface FilterState {
   codigoUnidadeAdministrativa: string;
   // Extended client-side filters (contratações)
   situacaoCompraId: string;
+  statusProposta: string; // "" | "a_receber" | "em_julgamento" | "encerrada"
   srp: string; // "" | "true" | "false"
   valorMinimo: string;
   valorMaximo: string;

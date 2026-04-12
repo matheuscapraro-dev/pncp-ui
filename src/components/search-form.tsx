@@ -18,6 +18,7 @@ import {
   MODOS_DISPUTA,
   UFS,
   SITUACAO_COMPRA,
+  STATUS_PROPOSTA,
   ESFERAS,
   PODERES,
   TIPOS_INSTRUMENTO_CONVOCATORIO,
@@ -88,6 +89,7 @@ export function SearchForm() {
   const activeClientFilterCount = [
     filters.textoBusca !== "",
     filters.situacaoCompraId !== "",
+    filters.statusProposta !== "",
     filters.srp !== "",
     filters.valorMinimo !== "",
     filters.valorMaximo !== "",
@@ -147,6 +149,7 @@ export function SearchForm() {
     if (filters.palavrasIncluir) toSave.palavrasIncluir = filters.palavrasIncluir;
     if (filters.palavrasExcluir) toSave.palavrasExcluir = filters.palavrasExcluir;
     if (filters.situacaoCompraId) toSave.situacaoCompraId = filters.situacaoCompraId;
+    if (filters.statusProposta) toSave.statusProposta = filters.statusProposta;
     if (filters.srp) toSave.srp = filters.srp;
     if (filters.uf) toSave.uf = filters.uf;
     if (filters.esferaId) toSave.esferaId = filters.esferaId;
@@ -466,6 +469,20 @@ export function SearchForm() {
                         <SelectContent>
                           <SelectItem value="all">Todas</SelectItem>
                           {Object.entries(SITUACAO_COMPRA).map(([id, nome]) => (
+                            <SelectItem key={id} value={id}>{nome}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {/* Status Proposta */}
+                    <div className="space-y-1">
+                      <Label className="text-xs">Status Proposta</Label>
+                      <Select value={filters.statusProposta}
+                        onValueChange={(v) => updateFilter("statusProposta", v === "all" ? "" : v)}>
+                        <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Todos" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">Todos</SelectItem>
+                          {Object.entries(STATUS_PROPOSTA).map(([id, nome]) => (
                             <SelectItem key={id} value={id}>{nome}</SelectItem>
                           ))}
                         </SelectContent>

@@ -82,6 +82,7 @@ const initialFilters: FilterState = {
   tamanhoPagina: 20,
   codigoUnidadeAdministrativa: "",
   situacaoCompraId: "",
+  statusProposta: "",
   srp: "",
   valorMinimo: "",
   valorMaximo: "",
@@ -192,6 +193,17 @@ function applyFilters(allResults: ResultItem[], f: FilterState, sortByPriority: 
         c.unidadeOrgao?.nomeUnidade?.toLowerCase().includes(q));
     }
     if (f.situacaoCompraId) items = items.filter((c) => String(c.situacaoCompraId) === f.situacaoCompraId);
+    if (f.statusProposta) {
+      const now = new Date();
+      items = items.filter((c) => {
+        if (f.statusProposta === "encerrada") return String(c.situacaoCompraId) !== "1";
+        if (!c.dataEncerramentoProposta) return false;
+        const enc = new Date(c.dataEncerramentoProposta);
+        if (f.statusProposta === "a_receber") return enc >= now && String(c.situacaoCompraId) === "1";
+        if (f.statusProposta === "em_julgamento") return enc < now && String(c.situacaoCompraId) === "1";
+        return true;
+      });
+    }
     if (f.srp === "true") items = items.filter((c) => c.srp);
     else if (f.srp === "false") items = items.filter((c) => !c.srp);
     if (f.esferaId) items = items.filter((c) => c.orgaoEntidade?.esferaId === f.esferaId);
