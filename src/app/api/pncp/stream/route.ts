@@ -2,14 +2,14 @@ import { NextRequest } from "next/server";
 
 const PNCP_BASE = "https://pncp.gov.br/api/consulta";
 
-// ─── Tuning for 500+ page fetches ───────────────────────────────────────────
-const CONCURRENCY = 8;            // parallel requests per wave
-const FETCH_TIMEOUT_MS = 5_000;   // 5s timeout — PNCP responds in <1s when healthy
-const WAVE_DELAY_MS = 200;        // pause between concurrency waves
-const MAX_ATTEMPTS = 4;           // total attempts per page (1 initial + 3 retries)
-const RETRY_PASSES = 3;           // number of full retry sweeps for failures
-const RETRY_WAVE_DELAY_MS = 1_000; // pause between retry waves
-const RETRY_CONCURRENCY = 4;      // concurrency for retries
+// ─── Tuning (mirrors worker/src/fetch-pncp.ts) ─────────────────────────────
+const CONCURRENCY = 5;             // parallel requests per wave
+const FETCH_TIMEOUT_MS = 15_000;   // 15s timeout — PNCP can be slow
+const WAVE_DELAY_MS = 500;         // pause between concurrency waves
+const MAX_ATTEMPTS = 5;            // total attempts per page (1 initial + 4 retries)
+const RETRY_PASSES = 3;            // number of full retry sweeps for failures
+const RETRY_WAVE_DELAY_MS = 2_000; // pause between retry waves
+const RETRY_CONCURRENCY = 3;       // concurrency for retries
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
