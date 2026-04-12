@@ -18,6 +18,7 @@ export interface SubscriptionFilters {
 
   // Client-side filters (applied after fetching)
   situacaoCompraId: string;
+  statusProposta: string;
   srp: string;
   valorMinimo: string;
   valorMaximo: string;

@@ -39,6 +39,7 @@ function filtersToSubscription(f: FilterState): SubscriptionFilters {
     cnpj: f.cnpj,
     codigoUnidadeAdministrativa: f.codigoUnidadeAdministrativa,
     situacaoCompraId: f.situacaoCompraId,
+    statusProposta: f.statusProposta,
     srp: f.srp,
     valorMinimo: f.valorMinimo,
     valorMaximo: f.valorMaximo,

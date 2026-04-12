@@ -22,6 +22,7 @@ export interface SubscriptionFilters {
   cnpj: string;
   codigoUnidadeAdministrativa: string;
   situacaoCompraId: string;
+  statusProposta: string;
   srp: string;
   valorMinimo: string;
   valorMaximo: string;
