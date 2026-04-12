@@ -58,6 +58,9 @@ import {
   PODERES,
   TIPOS_INSTRUMENTO_CONVOCATORIO,
 } from "@/lib/constants";
+import { SituacaoBadge, SrpBadge, CanceladoBadge } from "@/components/shared-badges";
+import { DetailSheet } from "@/components/detail-sheet";
+import type { CompraPublicacaoDTO } from "@/types/pncp";
 import type { Subscription, SubscriptionFilters } from "@/types/subscription";
 
 interface SubscriptionData {
@@ -166,16 +169,17 @@ function StatusBadge({ sub, processing }: { sub: Subscription; processing?: bool
 // ─── Contratação row ─────────────────────────────────────────────────────────
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function ContratacaoRow({ item }: { item: any }) {
+function ContratacaoRow({ item, onSelect }: { item: any; onSelect?: (item: any) => void }) {
   const cnpj = item.orgaoEntidade?.cnpj ?? "";
   const detailHref = `/licitacao/${cnpj}/${item.anoCompra}/${item.sequencialCompra}`;
 
   return (
-    <TableRow>
+    <TableRow
+      className="cursor-pointer hover:bg-muted/50 transition-colors"
+      onClick={() => onSelect?.(item)}
+    >
       <TableCell className="max-w-[400px]">
-        <Link href={detailHref} className="font-medium text-sm hover:underline line-clamp-2">
-          {item.objetoCompra ?? "—"}
-        </Link>
+        <p className="font-medium text-sm line-clamp-2">{item.objetoCompra ?? "—"}</p>
         <p className="text-xs text-muted-foreground mt-0.5 truncate">
           {item.orgaoEntidade?.razaoSocial ?? "—"}
         </p>
@@ -189,28 +193,34 @@ function ContratacaoRow({ item }: { item: any }) {
       <TableCell className="text-xs text-right whitespace-nowrap">
         {formatCurrency(item.valorTotalEstimado)}
       </TableCell>
+      <TableCell className="text-xs text-right whitespace-nowrap">
+        {formatCurrency(item.valorTotalHomologado)}
+      </TableCell>
       <TableCell className="text-xs whitespace-nowrap">
         {formatDate(item.dataPublicacaoPncp)}
       </TableCell>
-      <TableCell className="text-xs">
-        {item.situacaoCompraNome ?? "—"}
+      <TableCell>
+        <div className="flex flex-wrap gap-1">
+          <SituacaoBadge id={item.situacaoCompraId} />
+          <SrpBadge srp={item.srp} />
+        </div>
       </TableCell>
       <TableCell>
         <div className="flex gap-1">
           <Tooltip>
             <TooltipTrigger asChild>
-              <Link href={detailHref}>
+              <Link href={detailHref} onClick={(e) => e.stopPropagation()}>
                 <Button variant="ghost" size="icon" className="h-7 w-7">
                   <FileText className="h-3.5 w-3.5" />
                 </Button>
               </Link>
             </TooltipTrigger>
-            <TooltipContent>Ver detalhes</TooltipContent>
+            <TooltipContent>Abrir página completa</TooltipContent>
           </Tooltip>
           {item.linkSistemaOrigem && (
             <Tooltip>
               <TooltipTrigger asChild>
-                <a href={item.linkSistemaOrigem} target="_blank" rel="noopener noreferrer">
+                <a href={item.linkSistemaOrigem} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>
                   <Button variant="ghost" size="icon" className="h-7 w-7">
                     <ExternalLink className="h-3.5 w-3.5" />
                   </Button>
@@ -270,12 +280,8 @@ function AtaRow({ item }: { item: any }) {
       <TableCell className="text-xs whitespace-nowrap">
         {formatDate(item.vigenciaFim)}
       </TableCell>
-      <TableCell className="text-xs">
-        {item.cancelado ? (
-          <Badge variant="destructive" className="text-[10px]">Cancelada</Badge>
-        ) : (
-          <Badge variant="secondary" className="text-[10px]">Ativa</Badge>
-        )}
+      <TableCell>
+        <CanceladoBadge cancelado={item.cancelado} />
       </TableCell>
     </TableRow>
   );
@@ -543,6 +549,7 @@ export default function SubscriptionResultsPage() {
   const [localFilters, setLocalFilters] = useState<LocalFilters>(EMPTY_FILTERS);
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [now, setNow] = useState(Date.now());
+  const [selectedItem, setSelectedItem] = useState<CompraPublicacaoDTO | null>(null);
 
   // Tick every 30s so the cooldown timer and "time ago" labels stay fresh
   useEffect(() => {
@@ -879,8 +886,9 @@ export default function SubscriptionResultsPage() {
                         <TableHead className="w-[50px]">UF</TableHead>
                         <TableHead className="w-[140px]">Modalidade</TableHead>
                         <TableHead className="text-right w-[130px]">Valor Estimado</TableHead>
+                        <TableHead className="text-right w-[130px]">Homologado</TableHead>
                         <TableHead className="w-[100px]">Publicação</TableHead>
-                        <TableHead className="w-[100px]">Situação</TableHead>
+                        <TableHead className="w-[120px]">Situação</TableHead>
                         <TableHead className="w-[80px]" />
                       </>
                     )}
@@ -907,7 +915,7 @@ export default function SubscriptionResultsPage() {
                 <TableBody>
                   {displayItems.map((item, i) => {
                     const key = item.numeroControlePNCP || item.numeroControlePNCPAta || `row-${i}`;
-                    if (isContratacao) return <ContratacaoRow key={key} item={item} />;
+                    if (isContratacao) return <ContratacaoRow key={key} item={item} onSelect={setSelectedItem} />;
                     if (isContrato) return <ContratoRow key={key} item={item} />;
                     return <AtaRow key={key} item={item} />;
                   })}
@@ -982,6 +990,13 @@ export default function SubscriptionResultsPage() {
           </CardContent>
         </Card>
       )}
+
+      {/* Detail sidebar */}
+      <DetailSheet
+        item={selectedItem}
+        open={!!selectedItem}
+        onOpenChange={(open) => { if (!open) setSelectedItem(null); }}
+      />
     </div>
   );
 }
